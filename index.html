@@ -446,6 +446,7 @@ function update(dt) {
 function draw() {
   const c=CTX;
   c.save(); c.scale(SCALE,SCALE);
+  if(GS!=='PLAYING') shake=0;
   if(shake>0){ c.translate((Math.random()-.5)*shake*.4,(Math.random()-.5)*shake*.4); }
 
   if(GS==='HOME')              drawHome(c);
