@@ -133,46 +133,69 @@ function mkPlayer(){
   };
 }
 
-// ── Swipe Input ───────────────────────────────────────
-let tx0=0,ty0=0,tt0=0,tActive=false;
-const SW_MIN=30;
+// ── Swipe Input (Subway Surfers style real-time drag) ──
+let tx0=0,ty0=0,tActive=false;
+let tLastLaneX=0;       // x tại thời điểm đổi làn gần nhất
+let tDir=null;          // 'h'=horizontal | 'v'=vertical | null
+const LANE_THR=48;      // px để chuyển 1 làn
+const DIR_LOCK=12;      // px để lock direction
+
+function getPos(e){
+  const r=CV.getBoundingClientRect();
+  const s=e.touches?e.touches[0]:(e.changedTouches?e.changedTouches[0]:e);
+  return{x:(s.clientX-r.left)/SCALE, y:(s.clientY-r.top)/SCALE};
+}
 
 function onTD(e){
   e.preventDefault();
-  const r=CV.getBoundingClientRect();
-  const s=e.touches?e.touches[0]:e;
-  tx0=(s.clientX-r.left)/SCALE;
-  ty0=(s.clientY-r.top)/SCALE;
-  tt0=Date.now(); tActive=true;
-  // buttons
-  const pos={x:tx0,y:ty0};
+  const pos=getPos(e);
+  tx0=pos.x; ty0=pos.y; tLastLaneX=pos.x;
+  tActive=true; tDir=null;
+  // UI buttons
   for(const b of buttons){
     if(pos.x>=b.x&&pos.x<=b.x+b.w&&pos.y>=b.y&&pos.y<=b.y+b.h){b.fn();tActive=false;return;}
   }
   if(GS==='HOME'){startGame();tActive=false;return;}
 }
 
+function onTM(e){
+  // Real-time tracking — đây là điểm khác biệt với Subway Surfers
+  e.preventDefault();
+  if(!tActive||GS!=='PLAYING'||P.dead)return;
+  const pos=getPos(e);
+  const ddx=pos.x-tx0, ddy=pos.y-ty0;
+
+  // Lock direction sau khi ngón tay di chuyển đủ
+  if(!tDir){
+    if(Math.abs(ddx)>DIR_LOCK||Math.abs(ddy)>DIR_LOCK)
+      tDir=Math.abs(ddx)>Math.abs(ddy)?'h':'v';
+  }
+
+  // Nếu kéo ngang → đổi làn real-time
+  if(tDir==='h'){
+    const moved=pos.x-tLastLaneX;
+    if(moved<-LANE_THR){
+      goLane(-1);
+      tLastLaneX=pos.x; // reset gốc để kéo tiếp sang làn tiếp theo
+    } else if(moved>LANE_THR){
+      goLane(+1);
+      tLastLaneX=pos.x;
+    }
+  }
+}
+
 function onTU(e){
   e.preventDefault();
   if(!tActive)return; tActive=false;
   if(GS!=='PLAYING'||P.dead)return;
-  const r=CV.getBoundingClientRect();
-  const s=e.changedTouches?e.changedTouches[0]:e;
-  const ex=(s.clientX-r.left)/SCALE;
-  const ey=(s.clientY-r.top)/SCALE;
-  const ddx=ex-tx0, ddy=ty0-ey; // ddy positive = swipe up
-  if(Math.abs(ddx)<SW_MIN&&Math.abs(ddy)<SW_MIN)return;
+  const pos=getPos(e);
+  const ddy=ty0-pos.y; // positive = vuốt lên
 
-  if(Math.abs(ddx)>Math.abs(ddy)){
-    // Horizontal swipe
-    if(ddx<0) goLane(-1);
-    else       goLane(+1);
-  } else {
-    if(ddy>0){
-      // Swipe UP → jump
+  // Chỉ xử lý jump/slide khi vuốt dọc
+  if(tDir==='v'||(!tDir&&Math.abs(ddy)>28)){
+    if(ddy>28){
       if(P.onGnd&&!P.sliding){doJump();sfx('jump');}
-    } else {
-      // Swipe DOWN → slide
+    } else if(ddy<-28){
       if(P.onGnd&&!P.sliding){doSlide();}
     }
   }
@@ -195,9 +218,11 @@ function doSlide(){
   addPart(P.x,GROUND_Y,8,['#A5D6A7','#D7CCC8','#795548'],false);
 }
 
-CV.addEventListener('touchstart',onTD,{passive:false});
-CV.addEventListener('touchend',  onTU,{passive:false});
-CV.addEventListener('mousedown', onTD);
+CV.addEventListener('touchstart', onTD,{passive:false});
+CV.addEventListener('touchmove',  onTM,{passive:false}); // ← thêm touchmove
+CV.addEventListener('touchend',   onTU,{passive:false});
+CV.addEventListener('mousedown',  onTD);
+CV.addEventListener('mousemove',  e=>{if(e.buttons===1)onTM(e);}); // mouse drag
 CV.addEventListener('mouseup',   onTU);
 
 document.addEventListener('keydown',e=>{
