@@ -133,12 +133,18 @@ function mkPlayer(){
   };
 }
 
-// ── Swipe Input (Subway Surfers style real-time drag) ──
+// ── Swipe Input ───────────────────────────────────────
+// Logic:
+// - touchmove  → chỉ xử lý đổi làn (ngang), có cooldown 200ms/làn
+// - touchend   → chỉ xử lý jump/slide (dọc)
+// → 2 việc tách biệt hoàn toàn, không can thiệp nhau
+
 let tx0=0,ty0=0,tActive=false;
-let tLastLaneX=0;
-let tDir=null;
-const LANE_THR=42;
-const DIR_LOCK=18;
+let tRefX=0;                  // điểm gốc để tính moved
+let tLaneCooldown=0;          // timestamp lần đổi làn gần nhất
+const LANE_THR    = 38;       // px kéo để đổi 1 làn
+const LANE_CD_MS  = 200;      // ms giữa 2 lần đổi làn (tránh skip làn)
+const JUMP_MIN    = 22;       // px vuốt dọc tối thiểu để jump/slide
 
 function getPos(e){
   const r=CV.getBoundingClientRect();
@@ -149,7 +155,7 @@ function getPos(e){
 function onTD(e){
   e.preventDefault();
   const pos=getPos(e);
-  tx0=pos.x; ty0=pos.y; tLastLaneX=pos.x; tDir=null;
+  tx0=pos.x; ty0=pos.y; tRefX=pos.x;
   tActive=true;
   for(const b of buttons){
     if(pos.x>=b.x&&pos.x<=b.x+b.w&&pos.y>=b.y&&pos.y<=b.y+b.h){b.fn();tActive=false;return;}
@@ -158,33 +164,47 @@ function onTD(e){
 }
 
 function onTM(e){
+  // Xử lý đổi làn real-time khi kéo ngang
   e.preventDefault();
   if(!tActive||GS!=='PLAYING'||P.dead)return;
   const pos=getPos(e);
-  const totalDX=pos.x-tx0;
-  const totalDY=pos.y-ty0;
-  // Chỉ xử lý lane khi kéo NGANG rõ ràng hơn dọc
-  if(Math.abs(totalDX)>DIR_LOCK&&Math.abs(totalDX)>Math.abs(totalDY)*0.8){
-    tDir='h';
-    const moved=pos.x-tLastLaneX;
-    if(moved<-LANE_THR){goLane(-1);tLastLaneX=pos.x;}
-    else if(moved>LANE_THR){goLane(+1);tLastLaneX=pos.x;}
-  } else if(Math.abs(totalDY)>DIR_LOCK&&Math.abs(totalDY)>Math.abs(totalDX)*0.8){
-    tDir='v';
+  const dx=pos.x-tRefX;
+  const dyTotal=Math.abs(pos.y-ty0);
+
+  // Bỏ qua nếu đang vuốt dọc (jump/slide)
+  if(dyTotal>30&&dyTotal>Math.abs(pos.x-tx0))return;
+
+  // Đổi làn khi đủ ngưỡng VÀ hết cooldown
+  const now=Date.now();
+  if(now-tLaneCooldown<LANE_CD_MS)return;
+
+  if(dx<-LANE_THR){
+    goLane(-1);
+    tRefX=pos.x;          // reset gốc sau mỗi lần đổi
+    tLaneCooldown=now;
+  } else if(dx>LANE_THR){
+    goLane(+1);
+    tRefX=pos.x;
+    tLaneCooldown=now;
   }
 }
 
 function onTU(e){
+  // Xử lý jump/slide khi nhấc tay
   e.preventDefault();
   if(!tActive)return; tActive=false;
   if(GS!=='PLAYING'||P.dead)return;
   const pos=getPos(e);
-  const ddx=pos.x-tx0;
-  const ddy=ty0-pos.y; // positive = vuốt lên
-  // Dùng vector tổng start→end, ưu tiên vertical để jump/slide
-  if(Math.abs(ddy)>28&&Math.abs(ddy)>Math.abs(ddx)*0.6){
-    if(ddy>28){if(P.onGnd&&!P.sliding){doJump();sfx('jump');}}
-    else{if(P.onGnd&&!P.sliding){doSlide();}}
+  const ddx=Math.abs(pos.x-tx0);
+  const ddy=ty0-pos.y;   // dương = vuốt lên
+
+  // Chỉ trigger khi dọc rõ hơn ngang
+  if(Math.abs(ddy)<JUMP_MIN||ddx>Math.abs(ddy))return;
+
+  if(ddy>0){
+    if(P.onGnd&&!P.sliding){doJump();sfx('jump');}
+  } else {
+    if(P.onGnd&&!P.sliding){doSlide();}
   }
 }
 
