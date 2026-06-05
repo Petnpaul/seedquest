@@ -148,7 +148,11 @@ const JUMP_MIN    = 22;       // px vuốt dọc tối thiểu để jump/slide
 
 function getPos(e){
   const r=CV.getBoundingClientRect();
-  const s=e.touches?e.touches[0]:(e.changedTouches?e.changedTouches[0]:e);
+  // changedTouches phải check TRƯỚC — touchend có e.touches rỗng (truthy!)
+  // nên e.touches[0] = undefined → NaN → mọi tính toán sai hết
+  const s=(e.changedTouches&&e.changedTouches[0])
+        ||(e.touches&&e.touches[0])
+        ||e;
   return{x:(s.clientX-r.left)/SCALE,y:(s.clientY-r.top)/SCALE};
 }
 
@@ -198,8 +202,9 @@ function onTU(e){
   const ddx=Math.abs(pos.x-tx0);
   const ddy=ty0-pos.y;   // dương = vuốt lên
 
-  // Chỉ trigger khi dọc rõ hơn ngang
-  if(Math.abs(ddy)<JUMP_MIN||ddx>Math.abs(ddy))return;
+  // Jump khi vuốt lên đủ xa và không quá nghiêng ngang
+  if(Math.abs(ddy)<JUMP_MIN)return;
+  if(ddx>Math.abs(ddy)*1.8)return; // cho phép lệch ngang đến 80%
 
   if(ddy>0){
     if(P.onGnd&&!P.sliding){doJump();sfx('jump');}
