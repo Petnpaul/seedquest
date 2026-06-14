@@ -565,15 +565,6 @@ function drawHome(c){
   c.fillText(`🏆 Best: ${bestScore}s`,VW/2-72,192);
   c.fillText(`🪙 ${totalTok} Tokens`,VW/2+72,192);
 
-  // How to play
-  rrect(c,55,222,VW-110,88,14,'rgba(0,0,0,0.22)');
-  c.textAlign='center';c.font='800 13px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,0.9)';
-  c.fillText('🕹️ How to Play',VW/2,246);
-  c.font='700 12px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,0.75)';
-  c.fillText('← → Swipe left / right: Change lane',VW/2,266);
-  c.fillText('↑ Swipe up: Jump over obstacles',VW/2,284);
-  c.fillText('↓ Swipe down: Slide under walls',VW/2,302);
-
   const py=VH-190;
   drawBtn(c,VW/2-120,py,240,68,'🌟  PLAY  🌟','#43A047','#2E7D32','#fff',26,true);
   drawBtn(c,VW/2-90,py+82,180,50,SKINS[curSkin].n,'rgba(255,255,255,0.22)','rgba(0,0,0,0.15)','#fff',15,false);
