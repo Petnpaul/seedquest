@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
@@ -15,10 +15,10 @@ canvas{display:block;position:fixed}
 <canvas id="c"></canvas>
 <script>
 // ====================================================
-//  SEED QUEST v3 — 3-Lane Runner (Subway Surfers style)
-//  Swipe LEFT/RIGHT = đổi làn
-//  Swipe UP         = nhảy
-//  Swipe DOWN       = trượt
+//  SEED QUEST v4 — 3-Lane Runner (Subway Surfers style)
+//  Swipe LEFT/RIGHT = change lane
+//  Swipe UP         = jump
+//  Swipe DOWN       = slide
 // ====================================================
 const CV=document.getElementById('c');
 const CTX=CV.getContext('2d');
@@ -135,21 +135,21 @@ function mkPlayer(){
 
 // ── Swipe Input ───────────────────────────────────────
 // Logic:
-// - touchmove  → chỉ xử lý đổi làn (ngang), có cooldown 200ms/làn
-// - touchend   → chỉ xử lý jump/slide (dọc)
-// → 2 việc tách biệt hoàn toàn, không can thiệp nhau
+// - touchmove  → handle lane change (horizontal) with 200ms cooldown per lane
+// - touchend   → handle jump/slide (vertical only)
+// → Both actions are fully independent — no interference
 
 let tx0=0,ty0=0,tActive=false;
 let tRefX=0;                  // điểm gốc để tính moved
-let tLaneCooldown=0;          // timestamp lần đổi làn gần nhất
-const LANE_THR    = 38;       // px kéo để đổi 1 làn
-const LANE_CD_MS  = 200;      // ms giữa 2 lần đổi làn (tránh skip làn)
+let tLaneCooldown=0;          // timestamp of last lane change
+const LANE_THR    = 38;       // px drag to trigger lane switch
+const LANE_CD_MS  = 200;      // ms between lane switches (prevents skipping lanes)
 const JUMP_MIN    = 22;       // px vuốt dọc tối thiểu để jump/slide
 
 function getPos(e){
   const r=CV.getBoundingClientRect();
-  // changedTouches phải check TRƯỚC — touchend có e.touches rỗng (truthy!)
-  // nên e.touches[0] = undefined → NaN → mọi tính toán sai hết
+  // changedTouches must be checked FIRST — touchend has e.touches empty,
+  // so e.touches[0] = undefined → NaN → all calculations break
   const s=(e.changedTouches&&e.changedTouches[0])
         ||(e.touches&&e.touches[0])
         ||e;
@@ -168,23 +168,23 @@ function onTD(e){
 }
 
 function onTM(e){
-  // Xử lý đổi làn real-time khi kéo ngang
+  // Handle lane switching in real-time as finger drags horizontally
   e.preventDefault();
   if(!tActive||GS!=='PLAYING'||P.dead)return;
   const pos=getPos(e);
   const dx=pos.x-tRefX;
   const dyTotal=Math.abs(pos.y-ty0);
 
-  // Bỏ qua nếu đang vuốt dọc (jump/slide)
+  // Ignore if swiping vertically (jump/slide)
   if(dyTotal>30&&dyTotal>Math.abs(pos.x-tx0))return;
 
-  // Đổi làn khi đủ ngưỡng VÀ hết cooldown
+  // Switch lane when threshold met AND cooldown elapsed
   const now=Date.now();
   if(now-tLaneCooldown<LANE_CD_MS)return;
 
   if(dx<-LANE_THR){
     goLane(-1);
-    tRefX=pos.x;          // reset gốc sau mỗi lần đổi
+    tRefX=pos.x;          // reset origin after each lane change
     tLaneCooldown=now;
   } else if(dx>LANE_THR){
     goLane(+1);
@@ -194,7 +194,7 @@ function onTM(e){
 }
 
 function onTU(e){
-  // Xử lý jump/slide khi nhấc tay
+  // Handle jump/slide on finger lift
   e.preventDefault();
   if(!tActive)return; tActive=false;
   if(GS!=='PLAYING'||P.dead)return;
@@ -231,7 +231,7 @@ function doSlide(){
 }
 
 CV.addEventListener('touchstart', onTD,{passive:false});
-CV.addEventListener('touchmove',  onTM,{passive:false}); // ← thêm touchmove
+CV.addEventListener('touchmove',  onTM,{passive:false}); // real-time lane switching
 CV.addEventListener('touchend',   onTU,{passive:false});
 CV.addEventListener('mousedown',  onTD);
 CV.addEventListener('mousemove',  e=>{if(e.buttons===1)onTM(e);}); // mouse drag
@@ -287,7 +287,7 @@ function startGame(){
   GS='PLAYING';
   elapsed=0;frameN=0;lvlIdx=0;scrollZ=0;
   flashTimer=0;shake=0;lastSpawn=0;
-  lives=isFirst?3:2; sessionTok=0;
+  lives=3; sessionTok=0;
   obstacles=[];coins=[];particles=[];bgObjs=[];
   revived=false;canRevive=false;
   P=mkPlayer(); buttons=[];
@@ -390,7 +390,7 @@ function respawn(){
 }
 
 function doRevive(){
-  revived=true;lives=2;
+  revived=true;lives=3;
   P=mkPlayer();P.blink=240;
   obstacles=obstacles.filter(o=>o.z>100);
   sfx('lvlup');GS='PLAYING';isFirst=false;buttons=[];
@@ -437,7 +437,7 @@ function update(dt){
 
   // Token
   const p2=Math.floor(elapsed-dt),c2=Math.floor(elapsed);
-  if(c2>p2&&c2%8===0)sessionTok++;
+  if(c2>p2&&c2%10===0)sessionTok++;
 
   // Lane transition
   if(P.moving){
@@ -555,7 +555,7 @@ function drawHome(c){
   c.fillStyle='#fff';c.fillText('🌱 Seed Quest',VW/2,115);
   c.shadowBlur=0;
   c.font='700 15px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,0.9)';
-  c.fillText('3 Làn · Swipe để chơi',VW/2,143);
+  c.fillText('3 Lanes · Swipe to Play',VW/2,143);
   c.restore();
 
   // Stats
@@ -567,11 +567,11 @@ function drawHome(c){
   // How to play
   rrect(c,55,222,VW-110,88,14,'rgba(0,0,0,0.22)');
   c.textAlign='center';c.font='800 13px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,0.9)';
-  c.fillText('🕹️ Cách chơi',VW/2,246);
+  c.fillText('🕹️ How to Play',VW/2,246);
   c.font='700 12px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,0.75)';
-  c.fillText('← → Vuốt trái/phải: Đổi làn',VW/2,266);
-  c.fillText('↑ Vuốt lên: Nhảy qua vật cản',VW/2,284);
-  c.fillText('↓ Vuốt xuống: Trượt dưới chướng ngại',VW/2,302);
+  c.fillText('← → Swipe left / right: Change lane',VW/2,266);
+  c.fillText('↑ Swipe up: Jump over obstacles',VW/2,284);
+  c.fillText('↓ Swipe down: Slide under walls',VW/2,302);
 
   const py=VH-190;
   drawBtn(c,VW/2-120,py,240,68,'🌟  PLAY  🌟','#43A047','#2E7D32','#fff',26,true);
@@ -681,7 +681,7 @@ function drawPlay(c){
   if(P.sliding){
     c.globalAlpha=.75;c.fillStyle='#FFD740';
     c.font='800 14px Nunito,sans-serif';c.textAlign='center';
-    c.fillText('TRƯỢT! 🏂',P.x,P.y-52);
+    c.fillText('SLIDE! 🏂',P.x,P.y-52);
     c.globalAlpha=1;
   }
 
@@ -1031,14 +1031,12 @@ function drawGameOver(c){
   c.font='700 14px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.45)';c.fillText(`Best: ${bestScore}s`,VW/2,430);
   if(canRevive){
     c.font='700 13px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.55)';
-    c.fillText('Xem quảng cáo để tiếp tục!',VW/2,462);
+    c.fillText('Watch an ad to keep going!',VW/2,462);
   }
   for(const b of buttons){
     const ip=b.style==='green';
     drawBtn(c,b.x,b.y,b.w,b.h,b.label,ip?'#43A047':'rgba(255,255,255,.15)',ip?'#2E7D32':'rgba(0,0,0,.2)','#fff',ip?18:16,true);
   }
-  c.font='600 12px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.3)';
-  c.fillText('Remove Ads Forever — $1.99',VW/2,VH-72);
 }
 
 // ── Loop ──────────────────────────────────────────────
