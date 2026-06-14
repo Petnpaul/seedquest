@@ -373,10 +373,10 @@ function playerDie(){
   lives--;
   setTimeout(()=>{
     if(lives<=0){
-      canRevive=elapsed>=20&&!revived;
+      canRevive=elapsed>=20; // Option A: unlimited ad-revives
       if(Math.floor(elapsed)>bestScore){bestScore=Math.floor(elapsed);save();}
       totalTok+=sessionTok;save();
-      GS='GAMEOVER';buildGOBtns();
+      shake=0;GS='GAMEOVER';buildGOBtns();
     }else respawn();
   },1400);
 }
@@ -390,7 +390,8 @@ function respawn(){
 }
 
 function doRevive(){
-  revived=true;lives=3;
+  // First run already had 3 lives; every ad-revive gives 2 lives
+  lives=2;
   P=mkPlayer();P.blink=240;
   obstacles=obstacles.filter(o=>o.z>100);
   sfx('lvlup');GS='PLAYING';isFirst=false;buttons=[];
