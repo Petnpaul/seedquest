@@ -373,7 +373,7 @@ function playerDie(){
   lives--;
   setTimeout(()=>{
     if(lives<=0){
-      canRevive=elapsed>=20; // Option A: unlimited ad-revives
+      canRevive=true; // Always show Watch Ad when lives run out
       if(Math.floor(elapsed)>bestScore){bestScore=Math.floor(elapsed);save();}
       totalTok+=sessionTok;save();
       shake=0;GS='GAMEOVER';buildGOBtns();
