@@ -515,7 +515,7 @@ function update(dt){
 // ── Perspective Projection ────────────────────────────
 // Map world z (0=near player, 800=horizon) to screen
 function proj(worldX,worldZ,worldY=0){
-  const horizon=260;     // horizon Y
+  const horizon=140;     // horizon Y — raised to show more road
   const camZ=0;
   const fov=320;
   const z=Math.max(1,worldZ);
@@ -585,15 +585,15 @@ function drawPlay(c){
     ['#0D1B6E','#4A148C'],
   ];
   const si=lvlIdx<2?0:lvlIdx<4?1:2;
-  const sg=c.createLinearGradient(0,0,0,280);
+  const sg=c.createLinearGradient(0,0,0,140);
   sg.addColorStop(0,skies[si][0]);sg.addColorStop(1,skies[si][1]);
-  c.fillStyle=sg;c.fillRect(0,0,VW,280);
+  c.fillStyle=sg;c.fillRect(0,0,VW,140);
 
   // Stars (night)
   if(si===2){
     for(let i=0;i<55;i++){
       const sx2=((i*137+scrollZ*.02)%VW+VW)%VW;
-      const sy2=20+((i*97)%200);
+      const sy2=10+((i*97)%120);
       const sr=.8+Math.sin(i+frameN*.07)*.6;
       c.globalAlpha=.5+Math.sin(i*3+frameN*.08)*.4;
       c.fillStyle='white';c.beginPath();c.arc(sx2,sy2,sr,0,Math.PI*2);c.fill();
@@ -700,7 +700,7 @@ function drawPlay(c){
 
 // ── Road Drawing ──────────────────────────────────────
 function drawRoad(c,sz){
-  const horizon=260;
+  const horizon=140;
   const roadW_near=360,roadW_far=90;
   const roadL=VW/2;
 
