@@ -301,6 +301,7 @@ function startGame(){
   revived=false;canRevive=false;
   P=mkPlayer(); buttons=[];
   initBG();
+  preloadRoad(); // seed road with coins + obstacles from frame 1
 }
 
 function initBG(){
@@ -316,12 +317,35 @@ function initBG(){
   }
 }
 
+function preloadRoad(){
+  const spd=curSpd();
+  // Zone A: z=55–230 — dense coins on ALL 3 lanes (appear in first ~0.6s)
+  for(let lane=0;lane<3;lane++){
+    for(let i=0;i<5;i++)
+      coins.push({lane,z:55+i*38+lane*11,r:13,got:false,bouncePh:i*.4+lane*.28,type:'coin'});
+  }
+  // Zone B: z=280–420 — more coins, mid-distance
+  spawnCoinsAllLanes(310);
+  spawnCoinsAllLanes(410);
+  // Zone C: first obstacle (rock) + coins around it
+  const lA=Math.floor(Math.random()*3);
+  obstacles.push(mkObs(lA, 490, 'rock', spd));
+  spawnCoins(490);
+  // Zone D: z=560–640 — second obstacle (thorn) + coins
+  const lB=(lA+1+Math.floor(Math.random()*2))%3;
+  obstacles.push(mkObs(lB, 600, 'thorn', spd));
+  spawnCoinsAllLanes(560);
+  // Zone E: z=680–760 — third obstacle (low bar) + coin carpet
+  const lC=(lB+1+Math.floor(Math.random()*2))%3;
+  obstacles.push(mkObs(lC, 710, 'low', spd));
+  spawnCoinsAllLanes(690);
+  // Zone F: z=790 — one more coin wave right at spawn horizon
+  spawnCoinsAllLanes(790);
+}
+
 function spawnRow(){
   const spd=curSpd();
   const z=820+Math.random()*160;
-
-  // Grace period: 0–5s empty road
-  if(elapsed<5)return;
 
   // Guaranteed pothole every 15s
   if(elapsed-lastPotholeTime>=15){
