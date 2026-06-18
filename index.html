@@ -107,8 +107,11 @@ let elapsed=0,lvlIdx=0,lives=3,sessionTok=0;
 let isFirst=true,canRevive=false,revived=false;
 let frameN=0,lastSpawn=0;
 let flashTimer=0,flashName='',shake=0;
-let breathTimer=0;      // 10s breathing room after level-up
-let postPotholeGap=0;   // forced gap after pothole spawn
+let breathTimer=0;
+let postPotholeGap=0;
+let lastUfoTime=-30;     // ensures UFO available at 15s
+let lastPotholeTime=0;
+let lastAerialSpawn=0;
 let obstacles=[],coins=[],particles=[],bgObjs=[];
 let buttons=[];
 let scrollZ=0;
@@ -268,9 +271,13 @@ function getLvl(t){
   if(t<220)return 3;if(t<300)return 4;return 5;
 }
 function curSpd(){
-  const s=LEVELS[Math.min(lvlIdx,5)].spd;
-  if(lvlIdx>=5)return(1.8+Math.max(0,Math.floor((elapsed-300)/60))*.08)*BASE_SPD;
-  return s*BASE_SPD;
+  const base=LEVELS[Math.min(lvlIdx,5)].spd;
+  const lateBonus=elapsed>180?Math.floor((elapsed-180)/60)*0.15:0;
+  if(lvlIdx>=5){
+    const legBonus=Math.max(0,Math.floor((elapsed-300)/60))*.08;
+    return(base+legBonus+lateBonus)*BASE_SPD;
+  }
+  return(base+lateBonus)*BASE_SPD;
 }
 function spawnIv(){
   const base=Math.max(85,LEVELS[Math.min(lvlIdx,5)].iv-frameN*.004);
@@ -284,6 +291,7 @@ function startGame(){
   elapsed=0;frameN=0;lvlIdx=0;scrollZ=0;
   flashTimer=0;shake=0;lastSpawn=0;
   breathTimer=0;postPotholeGap=0;
+  lastUfoTime=-30;lastPotholeTime=0;lastAerialSpawn=0;
   lives=3; sessionTok=0;
   obstacles=[];coins=[];particles=[];bgObjs=[];
   revived=false;canRevive=false;
@@ -308,81 +316,56 @@ function spawnRow(){
   const spd=curSpd();
   const z=820+Math.random()*160;
 
-  // ── UFO pickup ──
-  // Available from 15s, chance grows with level, more at high levels
-  const ufoPct=0.04+lvlIdx*0.022;
-  if(elapsed>15&&!P.flying&&Math.random()<ufoPct){
+  // Grace period: 0–5s empty road
+  if(elapsed<5)return;
+
+  // Guaranteed pothole every 15s
+  if(elapsed-lastPotholeTime>=15){
+    lastPotholeTime=elapsed;
+    obstacles.push(mkObs(Math.floor(Math.random()*3),z,'pothole',spd));
+    postPotholeGap=Math.floor(spawnIv()*3.5);
+    spawnCoins(z);return;
+  }
+  if(postPotholeGap>0)return;
+
+  // Guaranteed UFO every 30s (from 15s onward)
+  if(elapsed>=15&&!P.flying&&elapsed-lastUfoTime>=30){
+    lastUfoTime=elapsed;
     coins.push({lane:Math.floor(Math.random()*3),z,r:18,got:false,bouncePh:0,type:'ufo'});
   }
 
-  // ── Aerial obstacles when flying ──
-  if(P.flying&&P.flyTimer>120){
-    if(Math.random()<0.45){ // 45% chance — not too frequent, should feel like reward
-      const al=Math.floor(Math.random()*3);
-      const isDove=Math.random()<0.8; // 80% dove, 20% bee
-      obstacles.push({lane:al,z,type:isDove?'dove':'bee',
-        aerial:true,active:true,w:58,h:32,flyOff:Math.random()*Math.PI*2,spd});
-    }
-    return; // no ground obstacles during flight
-  }
-
-  // ── Grace period: 0–5s totally empty ──
-  if(elapsed<5)return;
-
-  // ── Forced gap after pothole ──
-  if(postPotholeGap>0)return;
-
-  // ── Breathing room after level-up: only sparse singles ──
+  // Breathing room after level-up: only sparse singles
   if(breathTimer>0){
-    obstacles.push(mkObs(Math.floor(Math.random()*3),z,'single_easy',spd));
-    spawnCoins(z);
-    return;
+    obstacles.push(mkObs(Math.floor(Math.random()*3),z,'rock',spd));
+    spawnCoins(z);return;
   }
 
-  // ── Normal pattern selection ──
-  // Restrict dangerous patterns: no doubles/walls if obstacles nearby
-  const nearbyCount=obstacles.filter(o=>!o.aerial&&o.z<700).length;
+  // Normal pattern selection
+  const earlyGame=elapsed<35;
+  const nearbyCount=obstacles.filter(o=>!o.aerial&&o.z<600).length;
   const safe=nearbyCount===0;
-
-  const earlyGame=elapsed<35; // first 35s = only singles
-  const patterns=['single','single','single','pothole','wall_slide','double','wall_jump','zigzag'];
-  const maxPat=earlyGame?3:safe?3+Math.floor(lvlIdx*1.1):3; // restrict when busy
+  const patterns=['single','single','single','wall_slide','stagger','double','wall_jump','zigzag'];
+  const maxPat=earlyGame?3:safe?4+Math.floor(lvlIdx):3;
   const pat=patterns[Math.floor(Math.random()*Math.min(maxPat,patterns.length))];
 
-  if(pat==='single'||pat==='single_easy'){
-    obstacles.push(mkObs(Math.floor(Math.random()*3),z,pickObsType(),spd));
-  }
-  else if(pat==='pothole'){
-    obstacles.push(mkObs(Math.floor(Math.random()*3),z,'pothole',spd));
-    postPotholeGap=Math.floor(spawnIv()*3.2); // 3+ spawn intervals of clear road
-  }
-  else if(pat==='double'&&safe){
-    const skip=Math.floor(Math.random()*3);
-    for(let l=0;l<3;l++) if(l!==skip)
-      obstacles.push(mkObs(l,z,pickObsType(),spd));
-  }
-  else if(pat==='wall_jump'&&safe){
-    const free=Math.floor(Math.random()*3);
-    for(let l=0;l<3;l++) if(l!==free)
-      obstacles.push(mkObs(l,z,'low',spd));
-  }
-  else if(pat==='wall_slide'){
-    obstacles.push(mkObs(Math.floor(Math.random()*3),z,'tall',spd));
-  }
-  else if(pat==='zigzag'&&safe){
-    const l1=Math.floor(Math.random()*3);
-    const l2=(l1+1+Math.floor(Math.random()*2))%3;
-    obstacles.push(mkObs(l1,z,pickObsType(),spd));
-    obstacles.push(mkObs(l2,z+560,pickObsType(),spd)); // wide gap
-  }
-  else{
-    // Fallback to single if pattern unsafe
-    obstacles.push(mkObs(Math.floor(Math.random()*3),z,pickObsType(),spd));
-  }
+  if(pat==='stagger'&&safe)      spawnStagger(z,spd);
+  else if(pat==='double'&&safe){ const sk=Math.floor(Math.random()*3);for(let l=0;l<3;l++)if(l!==sk)obstacles.push(mkObs(l,z,pickObsType(),spd));}
+  else if(pat==='wall_jump'&&safe){const fr=Math.floor(Math.random()*3);for(let l=0;l<3;l++)if(l!==fr)obstacles.push(mkObs(l,z,'low',spd));}
+  else if(pat==='wall_slide')    obstacles.push(mkObs(Math.floor(Math.random()*3),z,'tall',spd));
+  else if(pat==='zigzag'&&safe){ const l1=Math.floor(Math.random()*3),l2=(l1+1+Math.floor(Math.random()*2))%3;
+    obstacles.push(mkObs(l1,z,pickObsType(),spd));obstacles.push(mkObs(l2,z+560,pickObsType(),spd));}
+  else                           obstacles.push(mkObs(Math.floor(Math.random()*3),z,pickObsType(),spd));
 
   spawnCoins(z);
 }
 
+function spawnStagger(z,spd){
+  // 3 obstacles in 3 different lanes, staggered — always dodgeable by lane switching
+  const lanes=[0,1,2].sort(()=>Math.random()-.5);
+  obstacles.push(mkObs(lanes[0],z,         pickObsType(),spd));
+  obstacles.push(mkObs(lanes[1],z+310,     pickObsType(),spd));
+  obstacles.push(mkObs(lanes[2],z+620,     pickObsType(),spd));
+}
 function spawnCoins(z){
   const freeLane=Math.floor(Math.random()*3);
   for(let i=0;i<4;i++)
@@ -474,7 +457,7 @@ function update(dt){
   if(newL>lvlIdx){
     lvlIdx=newL;flashTimer=130;flashName=LEVELS[lvlIdx].name;
     sfx('lvlup');checkUnlocks();
-    breathTimer=600; // 10s breathing room on level up
+    breathTimer=300; // 5s breathing room on level up
     addPart(VW/2,VH/2,30,['#FF4081','#7C4DFF','#00BCD4','#FFD600'],true);
   }
 
@@ -513,6 +496,16 @@ function update(dt){
   if(flashTimer>0)flashTimer--;
   if(breathTimer>0)breathTimer--;
   if(postPotholeGap>0)postPotholeGap--;
+
+  // Aerial obstacle spawn when flying (staggered, ~1.5s apart)
+  if(P.flying&&P.flyTimer>60&&frameN-lastAerialSpawn>=80){
+    lastAerialSpawn=frameN;
+    const types=['dove','dove','butterfly','bee'];
+    const t=types[Math.floor(Math.random()*types.length)];
+    const al=Math.floor(Math.random()*3);
+    obstacles.push({lane:al,z:820+Math.random()*100,type:t,
+      aerial:true,active:true,w:58,h:32,flyOff:Math.random()*Math.PI*2,spd:curSpd()*.88});
+  }
 
   // Move obstacles / coins toward player
   for(const o of obstacles)o.z-=spd;
@@ -635,50 +628,131 @@ function drawHome(c){
 
 // ── Play ──────────────────────────────────────────────
 function drawPlay(c){
-  // Sky
   const lvl=LEVELS[Math.min(lvlIdx,5)];
-  const skies=[
-    ['#87CEEB','#C8F0A0'],
-    ['#FF8C00','#C0390A'],
-    ['#0D1B6E','#4A148C'],
+
+  // ── Per-level sky ──
+  const skyThemes=[
+    ['#87CEEB','#C8F0A0'],  // 0 Garden
+    ['#FFAB40','#FF6F00'],  // 1 Hills
+    ['#111118','#1a1a2e'],  // 2 Tunnel
+    ['#87CEEB','#B3E5FC'],  // 3 Bridge
+    ['#FF7043','#880E4F'],  // 4 Autumn
+    ['#607D8B','#37474F'],  // 5 Railway
   ];
-  const si=lvlIdx<2?0:lvlIdx<4?1:2;
+  const sk=skyThemes[Math.min(lvlIdx,5)];
   const sg=c.createLinearGradient(0,0,0,140);
-  sg.addColorStop(0,skies[si][0]);sg.addColorStop(1,skies[si][1]);
+  sg.addColorStop(0,sk[0]);sg.addColorStop(1,sk[1]);
   c.fillStyle=sg;c.fillRect(0,0,VW,140);
 
-  // Stars (night)
-  if(si===2){
-    for(let i=0;i<55;i++){
-      const sx2=((i*137+scrollZ*.02)%VW+VW)%VW;
-      const sy2=10+((i*97)%120);
-      const sr=.8+Math.sin(i+frameN*.07)*.6;
-      c.globalAlpha=.5+Math.sin(i*3+frameN*.08)*.4;
-      c.fillStyle='white';c.beginPath();c.arc(sx2,sy2,sr,0,Math.PI*2);c.fill();
+  // Autumn: falling leaves in sky
+  if(lvlIdx===4){
+    const lc=['#FF5722','#FF9800','#FFC107','#E53935'];
+    for(let i=0;i<18;i++){
+      const lx=((i*137+frameN*.9+i*31)%VW+VW)%VW;
+      const ly=((i*83+frameN*(0.6+i*.025))%140+140)%140;
+      c.save();c.translate(lx,ly);c.rotate(i+frameN*.025);
+      c.fillStyle=lc[i%4];c.globalAlpha=.65;
+      c.beginPath();c.ellipse(0,0,4,7,0,0,Math.PI*2);c.fill();
+      c.restore();c.globalAlpha=1;
     }
-    c.globalAlpha=1;
   }
 
-  // BG trees/clouds
+  // ── Per-level BG objects ──
   for(const b of bgObjs){
-    const bx=b.side<0?80:VW-80;
+    const bx=b.side<0?72:VW-72;
     const {sx,sy,scale}=proj(bx,b.z,0);
     if(scale<0.05||scale>0.98)continue;
-    c.globalAlpha=Math.min(1,scale*1.2)*.7;
-    if(b.type==='tree'){
-      const h=b.size*scale;
-      c.fillStyle=si===0?'#2E7D32':si===1?'#1B5E20':'#1A237E';
-      c.beginPath();c.moveTo(sx,sy-h);c.lineTo(sx-h*.5,sy);c.lineTo(sx+h*.5,sy);c.closePath();c.fill();
-    } else {
-      c.fillStyle=si===2?'rgba(200,160,240,0.7)':'rgba(255,255,255,0.85)';
-      c.beginPath();c.arc(sx,sy-b.size*scale*.4,b.size*scale*.5,0,Math.PI*2);c.fill();
-      c.beginPath();c.arc(sx+b.size*scale*.35,sy-b.size*scale*.3,b.size*scale*.35,0,Math.PI*2);c.fill();
+    const h=b.size*scale;
+    c.globalAlpha=Math.min(1,scale*1.2)*.82;
+
+    switch(Math.min(lvlIdx,5)){
+      case 0:{ // Garden — green round trees
+        c.fillStyle='#5D4037';c.fillRect(sx-h*.08,sy-h*.45,h*.16,h*.45);
+        const tg=c.createRadialGradient(sx-h*.1,sy-h*.6,1,sx,sy-h*.55,h*.5);
+        tg.addColorStop(0,'#66BB6A');tg.addColorStop(1,'#2E7D32');
+        c.fillStyle=tg;c.beginPath();c.arc(sx,sy-h*.58,h*.46,0,Math.PI*2);c.fill();
+        break;}
+      case 1:{ // Hills — trees with flowers + rolling hill
+        c.fillStyle='rgba(56,142,60,0.45)';
+        c.beginPath();c.moveTo(sx-85*scale,sy);c.quadraticCurveTo(sx,sy-65*scale,sx+85*scale,sy);c.closePath();c.fill();
+        c.fillStyle='#4E342E';c.fillRect(sx-h*.07,sy-h*.48,h*.14,h*.48);
+        c.fillStyle='#1B5E20';c.beginPath();c.arc(sx,sy-h*.52,h*.4,0,Math.PI*2);c.fill();
+        const fc=['#F48FB1','#FF80AB','#FFFFFF','#FFE082'];
+        for(let fi=0;fi<5;fi++){const fa=fi/5*Math.PI*2;c.fillStyle=fc[fi%4];c.beginPath();c.arc(sx+Math.cos(fa)*h*.38,sy-h*.52+Math.sin(fa)*h*.3,h*.1,0,Math.PI*2);c.fill();}
+        break;}
+      case 2:{ // Tunnel — concrete walls + overhead lamps
+        c.fillStyle='#424242';
+        c.fillRect(b.side<0?sx-h*.25:sx-h*.15,sy-h*1.4,h*.38,h*1.4);
+        c.fillStyle='#616161';
+        c.fillRect(b.side<0?sx-h*.28:sx-h*.18,sy-h*.55,h*.44,h*.08);
+        c.fillRect(b.side<0?sx-h*.28:sx-h*.18,sy-h*.25,h*.44,h*.08);
+        if(Math.floor(b.z/110)%2===0){
+          c.fillStyle='rgba(255,215,70,.9)';c.beginPath();c.arc(sx,sy-h*1.1,h*.17,0,Math.PI*2);c.fill();
+          const lg=c.createRadialGradient(sx,sy-h*.9,2,sx,sy-h*.9,h*.9);
+          lg.addColorStop(0,'rgba(255,215,70,.2)');lg.addColorStop(1,'rgba(0,0,0,0)');
+          c.fillStyle=lg;c.fillRect(sx-h,sy-h*1.8,h*2,h*1.8);
+        }
+        break;}
+      case 3:{ // Bridge — railings + water + boats
+        c.fillStyle='#90A4AE';c.fillRect(sx-h*.06,sy-h*.85,h*.12,h*.85);
+        c.fillStyle='#78909C';
+        c.fillRect(b.side<0?sx-h*.05:sx-h*.35,sy-h*.65,h*.4,h*.055);
+        c.fillRect(b.side<0?sx-h*.05:sx-h*.35,sy-h*.35,h*.4,h*.055);
+        if(scale<0.42){
+          const wg=c.createLinearGradient(0,sy,0,sy+38*scale);
+          wg.addColorStop(0,'#1565C0');wg.addColorStop(1,'#0D47A1');
+          c.fillStyle=wg;c.fillRect(sx-28*scale,sy,56*scale,32*scale);
+          if(Math.floor(b.z/160)%3===0){
+            c.fillStyle='#BF360C';
+            c.beginPath();c.moveTo(sx-9*scale,sy+14*scale);c.lineTo(sx+9*scale,sy+14*scale);c.lineTo(sx+7*scale,sy+22*scale);c.lineTo(sx-7*scale,sy+22*scale);c.closePath();c.fill();
+            c.fillStyle='#E65100';c.fillRect(sx-1.5*scale,sy+6*scale,3*scale,10*scale);
+          }
+        }
+        break;}
+      case 4:{ // Autumn — multi-colour trees + falling leaves
+        c.fillStyle='#4E342E';c.fillRect(sx-h*.07,sy-h*.45,h*.14,h*.45);
+        const ac=['#E53935','#FF9800','#FFC107','#E64A19'];
+        for(let ai=0;ai<4;ai++){
+          const ax=sx+(ai-1.5)*h*.21,ay=sy-h*.52+(ai%2)*h*.14;
+          c.fillStyle=ac[ai];c.globalAlpha=Math.min(1,scale*1.2)*.78;
+          c.beginPath();c.arc(ax,ay,h*.3,0,Math.PI*2);c.fill();
+        }
+        const leafX=sx+Math.sin(frameN*.06+b.z)*18*scale;
+        const leafY=sy-h*.3-((frameN*1.1+b.z*.5)%110)*scale;
+        c.fillStyle=ac[Math.floor(frameN*.12+b.z)%4];
+        c.beginPath();c.ellipse(leafX,leafY,4*scale,6*scale,frameN*.1,0,Math.PI*2);c.fill();
+        break;}
+      case 5:{ // Railway — telegraph poles + signal lights + rail track
+        c.fillStyle='#5D4037';c.fillRect(sx-h*.05,sy-h*1.05,h*.1,h*1.05);
+        c.fillRect(sx-h*.28,sy-h*.95,h*.56,h*.05);
+        const sigOn=Math.floor(elapsed*2+b.side)%4<2;
+        c.fillStyle=sigOn?'#F44336':'#4CAF50';
+        c.beginPath();c.arc(sx+(b.side<0?h*.14:-h*.14),sy-h*.9,h*.12,0,Math.PI*2);c.fill();
+        c.fillStyle=sigOn?'rgba(244,67,54,.3)':'rgba(76,175,80,.3)';
+        c.beginPath();c.arc(sx+(b.side<0?h*.14:-h*.14),sy-h*.9,h*.22,0,Math.PI*2);c.fill();
+        c.fillStyle='#78909C';c.fillRect(b.side<0?sx-h*.18:sx+h*.06,sy-h*.04,h*.12,h*.04);
+        break;}
     }
     c.globalAlpha=1;
   }
 
   // Road
   drawRoad(c,scrollZ);
+
+  // Bridge: river surface visible below horizon
+  if(lvlIdx===3){
+    const rg=c.createLinearGradient(0,140,0,175);
+    rg.addColorStop(0,'#1565C0');rg.addColorStop(1,'#0D47A1');
+    c.fillStyle=rg;c.fillRect(0,140,VW,35);
+    // Wave lines
+    c.strokeStyle='rgba(100,181,246,0.35)';c.lineWidth=1.5;
+    for(let wi=0;wi<4;wi++){
+      const wy=148+wi*6;
+      c.beginPath();
+      for(let wx=0;wx<VW;wx+=8){c.lineTo(wx,wy+Math.sin((wx+frameN*2+wi*30)*.06)*3);}
+      c.stroke();
+    }
+  }
 
   // Coins + UFO items (sorted by z desc)
   const sortedCoins=[...coins].sort((a,b)=>b.z-a.z);
@@ -749,6 +823,23 @@ function drawPlay(c){
     c.font='800 14px Nunito,sans-serif';c.textAlign='center';
     c.fillText('SLIDE! 🏂',P.x,P.y-52);
     c.globalAlpha=1;
+  }
+
+  // Tunnel post-process overlay (Level 3) — drawn on top of everything
+  if(lvlIdx===2){
+    const cx2=P.dead?P.dx:P.x;
+    c.fillStyle='rgba(0,0,0,0.78)';c.fillRect(0,0,VW,VH);
+    // Player light halo
+    const hg=c.createRadialGradient(cx2,GROUND_Y-50,5,cx2,GROUND_Y-35,210);
+    hg.addColorStop(0,'rgba(255,200,80,0.32)');hg.addColorStop(1,'rgba(0,0,0,0)');
+    c.fillStyle=hg;c.fillRect(0,0,VW,VH);
+    // Two headlight beams
+    const bl=c.createRadialGradient(cx2-14,GROUND_Y-22,2,cx2-14,GROUND_Y-10,140);
+    bl.addColorStop(0,'rgba(255,240,180,0.38)');bl.addColorStop(1,'rgba(0,0,0,0)');
+    c.fillStyle=bl;c.fillRect(0,0,VW,VH);
+    const br=c.createRadialGradient(cx2+14,GROUND_Y-22,2,cx2+14,GROUND_Y-10,140);
+    br.addColorStop(0,'rgba(255,240,180,0.38)');br.addColorStop(1,'rgba(0,0,0,0)');
+    c.fillStyle=br;c.fillRect(0,0,VW,VH);
   }
 
   // HUD
@@ -968,6 +1059,39 @@ function drawObs3D(c,sx,sy,scale,o){
     c.beginPath();c.arc(bx+w*.08,by2-h*.25,3*scale,0,Math.PI*2);c.fill();
     c.fillStyle='#111';c.beginPath();c.arc(bx-w*.07,by2-h*.25,1.8*scale,0,Math.PI*2);c.fill();
     c.beginPath();c.arc(bx+w*.09,by2-h*.25,1.8*scale,0,Math.PI*2);c.fill();
+  }
+  else if(o.type==='butterfly'){
+    // Butterfly — colourful, aerial obstacle
+    const bx=sx,by2=sy-h*.5;
+    const flap=Math.sin(frameN*.18+o.flyOff);
+    const flapA=flap*0.6; // wing angle
+    const wcols=[['#E91E63','#AD1457'],['#9C27B0','#6A1B9A'],['#FF9800','#E65100'],['#00BCD4','#006064']];
+    const wc=wcols[Math.floor(o.flyOff*2)%wcols.length];
+    c.globalAlpha=.9;
+    // Upper wings
+    c.save();c.translate(bx,by2);c.rotate(-flapA);
+    c.fillStyle=wc[0];c.beginPath();c.ellipse(-w*.28,-h*.15,w*.3,h*.25,-.4,0,Math.PI*2);c.fill();
+    // Lower wings
+    c.fillStyle=wc[1];c.beginPath();c.ellipse(-w*.22,h*.1,w*.22,h*.18,-.8,0,Math.PI*2);c.fill();
+    c.restore();
+    c.save();c.translate(bx,by2);c.rotate(flapA);
+    c.fillStyle=wc[0];c.beginPath();c.ellipse(w*.28,-h*.15,w*.3,h*.25,.4,0,Math.PI*2);c.fill();
+    c.fillStyle=wc[1];c.beginPath();c.ellipse(w*.22,h*.1,w*.22,h*.18,.8,0,Math.PI*2);c.fill();
+    c.restore();
+    // Wing spots
+    c.fillStyle='rgba(255,255,255,0.5)';
+    c.beginPath();c.arc(bx-w*.22,by2-h*.1,h*.07,0,Math.PI*2);c.fill();
+    c.beginPath();c.arc(bx+w*.22,by2-h*.1,h*.07,0,Math.PI*2);c.fill();
+    // Body
+    c.fillStyle='#212121';c.beginPath();c.ellipse(bx,by2,h*.06,h*.32,0,0,Math.PI*2);c.fill();
+    // Antennae
+    c.strokeStyle='#212121';c.lineWidth=1.2*scale;
+    c.beginPath();c.moveTo(bx,by2-h*.28);c.lineTo(bx-w*.12,by2-h*.5);c.stroke();
+    c.beginPath();c.moveTo(bx,by2-h*.28);c.lineTo(bx+w*.12,by2-h*.5);c.stroke();
+    c.fillStyle='#FF9800';
+    c.beginPath();c.arc(bx-w*.12,by2-h*.5,2.5*scale,0,Math.PI*2);c.fill();
+    c.beginPath();c.arc(bx+w*.12,by2-h*.5,2.5*scale,0,Math.PI*2);c.fill();
+    c.globalAlpha=1;
   }
   c.restore();
 }
