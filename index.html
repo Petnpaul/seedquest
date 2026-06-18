@@ -75,7 +75,10 @@ const LEVELS=[
   {name:'Young Tree',  color:'#FFB74D',endT:150,spd:1.22,iv:105}, // gentle ramp
   {name:'Strong Tree', color:'#EF9A9A',endT:220,spd:1.38,iv:90},
   {name:'Ancient Tree',color:'#CE93D8',endT:300,spd:1.58,iv:78},
-  {name:'Legendary',   color:'#FF80AB',endT:Infinity,spd:1.8,iv:68},
+  {name:'Legendary',   color:'#FF80AB',endT:400,spd:1.8, iv:68},
+  {name:'King Kong',   color:'#8D6E63',endT:520,spd:2.0, iv:60},
+  {name:'Godzilla',    color:'#64FFDA',endT:660,spd:2.25,iv:55},
+  {name:'Dream Girl',  color:'#FF69B4',endT:Infinity,spd:2.5,iv:50},
 ];
 
 const SKINS=[
@@ -268,20 +271,21 @@ function rrect(c,x,y,w,h,r,fill,stroke){
 }
 function getLvl(t){
   if(t<40)return 0;if(t<90)return 1;if(t<150)return 2;
-  if(t<220)return 3;if(t<300)return 4;return 5;
+  if(t<220)return 3;if(t<300)return 4;if(t<400)return 5;
+  if(t<520)return 6;if(t<660)return 7;return 8;
 }
 function curSpd(){
-  const base=LEVELS[Math.min(lvlIdx,5)].spd;
+  const base=LEVELS[Math.min(lvlIdx,8)].spd;
   const lateBonus=elapsed>180?Math.floor((elapsed-180)/60)*0.15:0;
-  if(lvlIdx>=5){
-    const legBonus=Math.max(0,Math.floor((elapsed-300)/60))*.08;
+  if(lvlIdx>=8){
+    const legBonus=Math.max(0,Math.floor((elapsed-660)/60))*.08;
     return(base+legBonus+lateBonus)*BASE_SPD;
   }
   return(base+lateBonus)*BASE_SPD;
 }
 function spawnIv(){
-  const base=Math.max(68,LEVELS[Math.min(lvlIdx,5)].iv-frameN*.005);
-  if(breathTimer>0)return Math.max(base,148); // sparse but not empty during breathing
+  const base=Math.max(50,LEVELS[Math.min(lvlIdx,8)].iv-frameN*.005);
+  if(breathTimer>0)return Math.max(base,120); // sparse but not empty during breathing
   return base;
 }
 
@@ -323,10 +327,16 @@ function spawnRow(){
   if(elapsed-lastPotholeTime>=15){
     lastPotholeTime=elapsed;
     obstacles.push(mkObs(Math.floor(Math.random()*3),z,'pothole',spd));
-    postPotholeGap=Math.floor(spawnIv()*3.5);
-    spawnCoins(z);return;
+    postPotholeGap=Math.floor(spawnIv()*1.8); // reduced from 3.5 — shorter gap
+    spawnCoins(z);
+    spawnCoinsAllLanes(z+260); // fill road ahead after pothole
+    return;
   }
-  if(postPotholeGap>0)return;
+  if(postPotholeGap>0){
+    // Still fill with coins during the post-pothole pause
+    if(postPotholeGap % 82 === 0) spawnCoinsAllLanes(820+Math.random()*80);
+    return;
+  }
 
   // Guaranteed UFO every 30s (from 15s onward)
   if(elapsed>=15&&!P.flying&&elapsed-lastUfoTime>=30){
@@ -337,7 +347,9 @@ function spawnRow(){
   // Breathing room after level-up: only sparse singles
   if(breathTimer>0){
     obstacles.push(mkObs(Math.floor(Math.random()*3),z,'rock',spd));
-    spawnCoins(z);return;
+    spawnCoins(z);
+    spawnCoinsAllLanes(z+220); // extra fill during breathing room
+    return;
   }
 
   // Normal pattern selection
@@ -370,6 +382,13 @@ function spawnCoins(z){
   const freeLane=Math.floor(Math.random()*3);
   for(let i=0;i<4;i++)
     coins.push({lane:freeLane,z:z-50-i*55,r:13,got:false,bouncePh:i*.5,type:'coin'});
+}
+function spawnCoinsAllLanes(z){
+  // Fill all 3 lanes with coins to prevent long empty stretches
+  for(let lane=0;lane<3;lane++){
+    for(let i=0;i<4;i++)
+      coins.push({lane,z:z-i*60,r:13,got:false,bouncePh:i*.5+lane*0.25,type:'coin'});
+  }
 }
 
 function pickObsType(){
@@ -527,6 +546,13 @@ function update(dt){
   // Spawn
   if(frameN-lastSpawn>=spawnIv()){spawnRow();lastSpawn=frameN;}
 
+  // Gap filler: if road is empty and no pause active, add coin rows
+  if(elapsed>8&&frameN%105===0){
+    const frontObs=obstacles.filter(o=>!o.aerial&&o.z>80).length;
+    if(frontObs===0&&breathTimer<=0&&postPotholeGap<=0)
+      spawnCoinsAllLanes(820+Math.random()*100);
+  }
+
   // Collision
   if(!P.dead&&P.blink===0){
     const pr=P.sliding?14:19;
@@ -628,7 +654,7 @@ function drawHome(c){
 
 // ── Play ──────────────────────────────────────────────
 function drawPlay(c){
-  const lvl=LEVELS[Math.min(lvlIdx,5)];
+  const lvl=LEVELS[Math.min(lvlIdx,8)];
 
   // ── Per-level sky ──
   const skyThemes=[
@@ -638,8 +664,11 @@ function drawPlay(c){
     ['#87CEEB','#B3E5FC'],  // 3 Bridge
     ['#FF7043','#880E4F'],  // 4 Autumn
     ['#607D8B','#37474F'],  // 5 Railway
+    ['#1A1A2E','#4A0E0E'],  // 6 King Kong — dark city ablaze
+    ['#0D1117','#1A2E00'],  // 7 Godzilla — nuclear night
+    ['#FF69B4','#9B59B6'],  // 8 Dream Girl — magical pink-purple
   ];
-  const sk=skyThemes[Math.min(lvlIdx,5)];
+  const sk=skyThemes[Math.min(lvlIdx,8)];
   const sg=c.createLinearGradient(0,0,0,140);
   sg.addColorStop(0,sk[0]);sg.addColorStop(1,sk[1]);
   c.fillStyle=sg;c.fillRect(0,0,VW,140);
@@ -657,6 +686,43 @@ function drawPlay(c){
     }
   }
 
+  // King Kong: falling embers from city fires
+  if(lvlIdx===6){
+    for(let i=0;i<16;i++){
+      const ex=((i*113+frameN*.8+i*29)%VW+VW)%VW;
+      const ey=((i*71+frameN*(0.55+i*.022))%140+140)%140;
+      c.fillStyle=i%2===0?'#FF4500':'#FF8C00';
+      c.globalAlpha=.6+Math.sin(frameN*.1+i)*.3;
+      c.beginPath();c.arc(ex,ey,1.8,0,Math.PI*2);c.fill();
+      c.globalAlpha=1;
+    }
+  }
+
+  // Godzilla: floating radiation particles
+  if(lvlIdx===7){
+    for(let i=0;i<12;i++){
+      const gx=((i*157+frameN*.6+i*43)%VW+VW)%VW;
+      const gy=((i*97+frameN*(0.45+i*.028))%140+140)%140;
+      c.fillStyle='#ADFF2F';
+      c.globalAlpha=.25+Math.sin(frameN*.08+i)*.2;
+      c.beginPath();c.arc(gx,gy,2.5,0,Math.PI*2);c.fill();
+      c.globalAlpha=1;
+    }
+  }
+
+  // Dream Girl: floating pink petals
+  if(lvlIdx===8){
+    const pc=['#FFB7C5','#FF69B4','#FFC0CB'];
+    for(let i=0;i<22;i++){
+      const px=((i*137+frameN*.5+i*29)%VW+VW)%VW;
+      const py=((i*83+frameN*(0.38+i*.018))%140+140)%140;
+      c.save();c.translate(px,py);c.rotate(i+frameN*.012);
+      c.fillStyle=pc[i%3];c.globalAlpha=.7;
+      c.beginPath();c.ellipse(0,0,3,5,0,0,Math.PI*2);c.fill();
+      c.restore();c.globalAlpha=1;
+    }
+  }
+
   // ── Per-level BG objects ──
   for(const b of bgObjs){
     const bx=b.side<0?72:VW-72;
@@ -665,7 +731,7 @@ function drawPlay(c){
     const h=b.size*scale;
     c.globalAlpha=Math.min(1,scale*1.2)*.82;
 
-    switch(Math.min(lvlIdx,5)){
+    switch(Math.min(lvlIdx,8)){
       case 0:{ // Garden — green round trees
         c.fillStyle='#5D4037';c.fillRect(sx-h*.08,sy-h*.45,h*.16,h*.45);
         const tg=c.createRadialGradient(sx-h*.1,sy-h*.6,1,sx,sy-h*.55,h*.5);
@@ -680,18 +746,12 @@ function drawPlay(c){
         const fc=['#F48FB1','#FF80AB','#FFFFFF','#FFE082'];
         for(let fi=0;fi<5;fi++){const fa=fi/5*Math.PI*2;c.fillStyle=fc[fi%4];c.beginPath();c.arc(sx+Math.cos(fa)*h*.38,sy-h*.52+Math.sin(fa)*h*.3,h*.1,0,Math.PI*2);c.fill();}
         break;}
-      case 2:{ // Tunnel — concrete walls + overhead lamps
+      case 2:{ // Tunnel — concrete walls only (no glaring lamps)
         c.fillStyle='#424242';
         c.fillRect(b.side<0?sx-h*.25:sx-h*.15,sy-h*1.4,h*.38,h*1.4);
         c.fillStyle='#616161';
         c.fillRect(b.side<0?sx-h*.28:sx-h*.18,sy-h*.55,h*.44,h*.08);
         c.fillRect(b.side<0?sx-h*.28:sx-h*.18,sy-h*.25,h*.44,h*.08);
-        if(Math.floor(b.z/110)%2===0){
-          c.fillStyle='rgba(255,215,70,.9)';c.beginPath();c.arc(sx,sy-h*1.1,h*.17,0,Math.PI*2);c.fill();
-          const lg=c.createRadialGradient(sx,sy-h*.9,2,sx,sy-h*.9,h*.9);
-          lg.addColorStop(0,'rgba(255,215,70,.2)');lg.addColorStop(1,'rgba(0,0,0,0)');
-          c.fillStyle=lg;c.fillRect(sx-h,sy-h*1.8,h*2,h*1.8);
-        }
         break;}
       case 3:{ // Bridge — railings + water + boats
         c.fillStyle='#90A4AE';c.fillRect(sx-h*.06,sy-h*.85,h*.12,h*.85);
@@ -731,6 +791,97 @@ function drawPlay(c){
         c.fillStyle=sigOn?'rgba(244,67,54,.3)':'rgba(76,175,80,.3)';
         c.beginPath();c.arc(sx+(b.side<0?h*.14:-h*.14),sy-h*.9,h*.22,0,Math.PI*2);c.fill();
         c.fillStyle='#78909C';c.fillRect(b.side<0?sx-h*.18:sx+h*.06,sy-h*.04,h*.12,h*.04);
+        break;}
+      case 6:{ // King Kong — ruined city buildings + fire + barrels
+        // Building silhouette
+        const kbh=h*2.0;
+        c.fillStyle='#1A1A2E';c.fillRect(sx-h*.32,sy-kbh,h*.64,kbh);
+        // Lit / fire windows
+        for(let wr=0;wr<4;wr++)for(let wc2=0;wc2<3;wc2++){
+          const wx=sx-h*.24+wc2*h*.18, wy=sy-kbh+h*.18+wr*h*.42;
+          const litType=Math.floor(b.z*0.013+wr*7+wc2*3)%4;
+          if(litType===0){c.fillStyle='#FF8C00';c.fillRect(wx,wy,h*.12,h*.14);}
+          else if(litType===1){c.fillStyle='#FF4500';c.globalAlpha=.7+Math.sin(frameN*.1+wr)*.3;c.fillRect(wx,wy,h*.12,h*.14);c.globalAlpha=Math.min(1,scale*1.2)*.82;}
+        }
+        // Roof fire
+        const rft=frameN*.06+b.z*.012;
+        for(let fi=0;fi<5;fi++){
+          const ffx=sx-h*.18+fi*h*.09, fft=rft+fi*.8;
+          c.fillStyle=fi%2===0?'#FF4500':'#FF8C00';
+          c.globalAlpha=.7+Math.sin(fft)*.25;
+          c.beginPath();c.moveTo(ffx,sy-kbh);c.lineTo(ffx+h*.04,sy-kbh-Math.abs(Math.sin(fft))*h*.28);c.lineTo(ffx+h*.08,sy-kbh);c.closePath();c.fill();
+          c.globalAlpha=Math.min(1,scale*1.2)*.82;
+        }
+        // Barrel (side-only)
+        if(b.side>0){
+          c.fillStyle='#4E342E';c.beginPath();c.ellipse(sx+h*.42,sy-h*.18,h*.13,h*.09,0,0,Math.PI*2);c.fill();
+          c.fillRect(sx+h*.29,sy-h*.58,h*.26,h*.42);
+          c.fillStyle='#795548';for(let ri=0;ri<3;ri++)c.fillRect(sx+h*.28,sy-h*.52+ri*h*.16,h*.28,h*.03);
+          c.fillStyle='#4E342E';c.beginPath();c.ellipse(sx+h*.42,sy-h*.55,h*.13,h*.05,0,0,Math.PI*2);c.fill();
+        }
+        break;}
+      case 7:{ // Godzilla — burning skyscrapers + radioactive glow
+        const gbh=h*2.4;
+        c.fillStyle='#0D1117';c.fillRect(sx-h*.28,sy-gbh,h*.56,gbh);
+        // Cracked structure
+        c.strokeStyle='#FF4500';c.lineWidth=1.2*scale;c.globalAlpha=.5;
+        c.beginPath();c.moveTo(sx-h*.1,sy-gbh*.6);c.lineTo(sx+h*.04,sy-gbh*.35);c.lineTo(sx-h*.06,sy-gbh*.14);c.stroke();
+        c.globalAlpha=Math.min(1,scale*1.2)*.82;
+        // Roof fire
+        const gt=frameN*.055+b.z*.01;
+        for(let fi=0;fi<7;fi++){
+          const gfx=sx-h*.24+fi*h*.08, gft=gt+fi*.7;
+          c.fillStyle=fi%2===0?'#FF4500':'#ADFF2F';
+          c.globalAlpha=.65+Math.sin(gft)*.28;
+          c.beginPath();c.moveTo(gfx,sy-gbh);c.lineTo(gfx+h*.04,sy-gbh-Math.abs(Math.sin(gft))*h*.32);c.lineTo(gfx+h*.08,sy-gbh);c.closePath();c.fill();
+          c.globalAlpha=Math.min(1,scale*1.2)*.82;
+        }
+        // Radiation ground glow
+        if(b.side<0){
+          c.globalAlpha=(.2+Math.sin(frameN*.05+b.z)*.1)*scale;
+          c.fillStyle='#ADFF2F';c.beginPath();c.arc(sx,sy,h*.3,0,Math.PI*2);c.fill();
+          c.fillStyle='#0D1117';c.beginPath();c.arc(sx,sy,h*.14,0,Math.PI*2);c.fill();
+          for(let pi=0;pi<3;pi++){
+            const pa=pi*Math.PI*2/3-Math.PI/2;
+            c.globalAlpha=(.35+Math.sin(frameN*.05+b.z)*.15)*scale;
+            c.fillStyle='#ADFF2F';
+            c.beginPath();c.moveTo(sx,sy);c.arc(sx,sy,h*.3,pa+.28,pa+.9);c.closePath();c.fill();
+          }
+          c.globalAlpha=Math.min(1,scale*1.2)*.82;
+        }
+        break;}
+      case 8:{ // Dream Girl — cherry blossom trees + sparkles
+        // Trunk
+        c.fillStyle='#8D6E63';c.fillRect(sx-h*.07,sy-h*.75,h*.14,h*.75);
+        // Blossom clusters
+        const bcs=['#FFB7C5','#FF69B4','#FFC0CB','#FFD1DC'];
+        for(let bi=0;bi<7;bi++){
+          const ba=bi/7*Math.PI*2+Math.sin(frameN*.018+b.z*.008)*.1;
+          const bx2=sx+Math.cos(ba)*h*.42, by2=sy-h*.78+Math.sin(ba)*h*.25;
+          c.fillStyle=bcs[bi%4];c.globalAlpha=.88;
+          c.beginPath();c.arc(bx2,by2,h*.26,0,Math.PI*2);c.fill();
+        }
+        // Center cluster
+        c.fillStyle='#FF69B4';c.globalAlpha=.92;
+        c.beginPath();c.arc(sx,sy-h*.82,h*.3,0,Math.PI*2);c.fill();
+        // Falling petals
+        for(let pi=0;pi<4;pi++){
+          const pt=((frameN*.75+pi*60+b.z*.35)%150);
+          const ppx=sx+Math.sin(pi*1.5+frameN*.025)*16*scale;
+          const ppy=sy-h*.35-pt*scale;
+          if(ppy>0&&ppy<sy){
+            c.fillStyle=bcs[pi%4];c.globalAlpha=.72;
+            c.beginPath();c.ellipse(ppx,ppy,3.5*scale,5.5*scale,frameN*.04+pi,0,Math.PI*2);c.fill();
+          }
+        }
+        // Star sparkles
+        for(let si=0;si<4;si++){
+          const sa=(frameN*.07+si*1.57+b.z*.015)%(Math.PI*2);
+          const spx=sx+Math.cos(sa)*h*.52, spy=sy-h*.55+Math.sin(sa*2)*h*.22;
+          c.fillStyle='#FFD700';c.globalAlpha=.5+Math.sin(sa)*.4;
+          c.beginPath();c.arc(spx,spy,2*scale,0,Math.PI*2);c.fill();
+        }
+        c.globalAlpha=1;
         break;}
     }
     c.globalAlpha=1;
@@ -845,7 +996,7 @@ function drawPlay(c){
     c.font='900 40px Nunito,sans-serif';c.fillStyle='#fff';
     c.shadowColor='rgba(0,0,0,.5)';c.shadowBlur=18;c.fillText('LEVEL UP! ✨',0,0);
     c.shadowBlur=0;c.font='800 25px Nunito,sans-serif';
-    c.fillStyle=LEVELS[Math.min(lvlIdx,5)].color;c.fillText(flashName,0,44);
+    c.fillStyle=LEVELS[Math.min(lvlIdx,8)].color;c.fillText(flashName,0,44);
     c.restore();c.globalAlpha=1;
   }
 }
@@ -1092,7 +1243,7 @@ function drawLevelCostume(c,x,y,sc,sqX,sqY,af,sliding,shield,moving){
   if(sliding)c.scale(1.35*sc,0.62*sc);
   else c.scale(sqX*sc,sqY*sc);
 
-  switch(Math.min(lvlIdx,5)){
+  switch(Math.min(lvlIdx,8)){
     case 1:{ // ROBOT — metallic grey, blue visor
       // Body
       const rb=c.createLinearGradient(-18,-30,18,20);
@@ -1239,6 +1390,163 @@ function drawLevelCostume(c,x,y,sc,sqX,sqY,af,sliding,shield,moving){
         const fx=Math.sin(fa2)*14,fy=-30+bob-Math.abs(Math.cos(fa2))*18-fi2*4;
         c.fillStyle=fi2%2===0?'#FF5722':'#FFEB3B';c.globalAlpha=.6+Math.sin(fa2)*.3;
         c.beginPath();c.arc(fx,fy,2.5-fi2*.3,0,Math.PI*2);c.fill();
+      }
+      c.globalAlpha=1;
+      break;}
+    case 6:{ // KING KONG — massive gorilla, chest-beating
+      // Dark fur body
+      const kb=c.createRadialGradient(-8,-2+bob,3,0,2+bob,28);
+      kb.addColorStop(0,'#6D4C41');kb.addColorStop(1,'#3E2723');
+      c.beginPath();c.ellipse(0,2+bob,26,30,0,0,Math.PI*2);c.fillStyle=kb;c.fill();
+      // Chest patch (lighter fur)
+      const beatPulse=1+Math.abs(Math.sin(af*.08))*.14;
+      c.save();c.scale(beatPulse,1);
+      c.fillStyle='#8D6E63';c.beginPath();c.ellipse(0,0+bob,14,18,0,0,Math.PI*2);c.fill();
+      c.restore();
+      // Head
+      const kh=c.createRadialGradient(-6,-48+bob,3,0,-44+bob,22);
+      kh.addColorStop(0,'#6D4C41');kh.addColorStop(1,'#3E2723');
+      c.beginPath();c.arc(0,-44+bob,22,0,Math.PI*2);c.fillStyle=kh;c.fill();
+      // Flat face
+      c.fillStyle='#4E342E';c.beginPath();c.arc(0,-43+bob,11,0,Math.PI*2);c.fill();
+      // Nostrils
+      c.fillStyle='#1A0800';c.beginPath();c.arc(-4,-42+bob,3.5,0,Math.PI*2);c.fill();
+      c.beginPath();c.arc(4,-42+bob,3.5,0,Math.PI*2);c.fill();
+      // Angry deep-set eyes
+      c.fillStyle='#111';c.beginPath();c.arc(-8,-51+bob,5.5,0,Math.PI*2);c.fill();
+      c.beginPath();c.arc(8,-51+bob,5.5,0,Math.PI*2);c.fill();
+      c.fillStyle='#FF5722';c.beginPath();c.arc(-7,-51+bob,2.5,0,Math.PI*2);c.fill();
+      c.beginPath();c.arc(9,-51+bob,2.5,0,Math.PI*2);c.fill();
+      // Angry brows
+      c.strokeStyle='#1A0800';c.lineWidth=3.5;c.lineCap='round';
+      c.beginPath();c.moveTo(-14,-57+bob);c.lineTo(-3,-53+bob);c.stroke();
+      c.beginPath();c.moveTo(14,-57+bob);c.lineTo(3,-53+bob);c.stroke();
+      // Teeth
+      c.fillStyle='white';c.beginPath();c.arc(-3,-37+bob,2.8,0,Math.PI,true);c.fill();
+      c.beginPath();c.arc(3,-37+bob,2.8,0,Math.PI,true);c.fill();
+      c.strokeStyle='#1A0800';c.lineWidth=2;
+      c.beginPath();c.arc(0,-38+bob,7,0,Math.PI);c.stroke();
+      // Big arms
+      const armB=Math.sin(af*.08)*12;
+      c.strokeStyle='#5D4037';c.lineWidth=11;c.lineCap='round';
+      c.beginPath();c.moveTo(-26,0+bob);c.lineTo(-44,-8+bob+armB);c.stroke();
+      c.beginPath();c.moveTo(26,0+bob);c.lineTo(44,-8+bob-armB);c.stroke();
+      c.fillStyle='#4E342E';
+      c.beginPath();c.arc(-46,-10+bob+armB,9,0,Math.PI*2);c.fill();
+      c.beginPath();c.arc(46,-10+bob-armB,9,0,Math.PI*2);c.fill();
+      break;}
+    case 7:{ // GODZILLA — giant atomic lizard
+      // Body (dark green scales)
+      const gzb=c.createLinearGradient(-22,-28+bob,22,28+bob);
+      gzb.addColorStop(0,'#2E7D32');gzb.addColorStop(1,'#1B5E20');
+      c.beginPath();c.ellipse(0,2+bob,24,30,0,0,Math.PI*2);c.fillStyle=gzb;c.fill();
+      // Scale pattern
+      c.fillStyle='rgba(0,0,0,.22)';
+      for(let sri=0;sri<4;sri++)for(let scj=0;scj<3;scj++){
+        c.beginPath();c.arc(-12+scj*12,-18+sri*12+bob,6,0,Math.PI,true);c.fill();
+      }
+      // Belly
+      c.fillStyle='#81C784';c.beginPath();c.ellipse(0,5+bob,13,20,0,0,Math.PI*2);c.fill();
+      // Dorsal fin spikes
+      const fcs=['#1B5E20','#388E3C','#43A047'];
+      for(let fi=0;fi<6;fi++){
+        const fh=16-fi*1.5, ffx=-10+fi*4;
+        c.fillStyle=fcs[fi%3];
+        c.beginPath();c.moveTo(ffx,-26+bob-fh);c.lineTo(ffx-4,-26+bob);c.lineTo(ffx+4,-26+bob);c.closePath();c.fill();
+      }
+      // Head
+      const gzh=c.createLinearGradient(-16,-68+bob,16,-36+bob);
+      gzh.addColorStop(0,'#388E3C');gzh.addColorStop(1,'#1B5E20');
+      c.beginPath();c.moveTo(-15,-56+bob);c.lineTo(-18,-38+bob);c.lineTo(18,-38+bob);c.lineTo(15,-56+bob);c.lineTo(8,-68+bob);c.lineTo(-8,-68+bob);c.closePath();c.fillStyle=gzh;c.fill();
+      // Snout
+      c.fillStyle='#2E7D32';c.beginPath();c.ellipse(0,-40+bob,13,7,0,0,Math.PI*2);c.fill();
+      // Nostrils
+      c.fillStyle='#1B5E20';c.beginPath();c.arc(-5,-39+bob,2.5,0,Math.PI*2);c.fill();
+      c.beginPath();c.arc(5,-39+bob,2.5,0,Math.PI*2);c.fill();
+      // Atomic eyes (glowing teal)
+      c.fillStyle='#111';c.beginPath();c.arc(-8,-57+bob,5.5,0,Math.PI*2);c.fill();
+      c.beginPath();c.arc(8,-57+bob,5.5,0,Math.PI*2);c.fill();
+      c.fillStyle='#64FFDA';c.beginPath();c.arc(-7,-57+bob,2.8,0,Math.PI*2);c.fill();
+      c.beginPath();c.arc(9,-57+bob,2.8,0,Math.PI*2);c.fill();
+      c.globalAlpha=.3+Math.sin(af*.12)*.18;
+      c.fillStyle='#64FFDA';c.beginPath();c.arc(-7,-57+bob,7,0,Math.PI*2);c.fill();
+      c.beginPath();c.arc(9,-57+bob,7,0,Math.PI*2);c.fill();
+      c.globalAlpha=1;
+      // Atomic breath (pulsing)
+      if(Math.floor(af*.06)%6<2){
+        c.globalAlpha=.5+Math.sin(af*.2)*.2;
+        c.fillStyle='#64FFDA';
+        c.beginPath();c.moveTo(-5,-36+bob);c.lineTo(5,-36+bob);c.lineTo(14,-28+bob);c.lineTo(-14,-28+bob);c.closePath();c.fill();
+        c.globalAlpha=1;
+      }
+      // Tail
+      c.strokeStyle='#2E7D32';c.lineWidth=9;c.lineCap='round';
+      c.beginPath();c.moveTo(-22,12+bob);c.quadraticCurveTo(-40,22+bob,-44,34+bob);c.stroke();
+      break;}
+    case 8:{ // DREAM GIRL — beautiful princess
+      // Flowing dress
+      const dr=c.createLinearGradient(-24,-12+bob,24,32+bob);
+      dr.addColorStop(0,'#FF80AB');dr.addColorStop(.5,'#F48FB1');dr.addColorStop(1,'#CE93D8');
+      c.beginPath();c.moveTo(-24,-8+bob);c.bezierCurveTo(-30,10+bob,-34,30+bob,-18,34+bob);c.bezierCurveTo(-6,38+bob,6,38+bob,18,34+bob);c.bezierCurveTo(34,30+bob,30,10+bob,24,-8+bob);c.closePath();c.fillStyle=dr;c.fill();
+      c.strokeStyle='#F06292';c.lineWidth=1;c.stroke();
+      // Dress sparkles
+      for(let dsi=0;dsi<6;dsi++){
+        const dsa=dsi*.9+af*.04;
+        const dsx=Math.cos(dsa)*15, dsy=10+bob+Math.sin(dsa)*11;
+        c.fillStyle='white';c.globalAlpha=.6+Math.sin(dsa+af*.1)*.35;
+        c.beginPath();c.arc(dsx,dsy,1.8,0,Math.PI*2);c.fill();
+      }
+      c.globalAlpha=1;
+      // Bodice
+      c.fillStyle='#FF80AB';c.beginPath();c.moveTo(-12,-8+bob);c.lineTo(-12,6+bob);c.lineTo(12,6+bob);c.lineTo(12,-8+bob);c.closePath();c.fill();
+      // Skin (neck+head)
+      c.fillStyle='#FFCCBC';c.beginPath();c.arc(0,-44+bob,18,0,Math.PI*2);c.fill();
+      // Long flowing hair
+      c.fillStyle='#6D4C41';
+      c.beginPath();c.moveTo(-13,-60+bob);c.bezierCurveTo(-24,-46+bob,-30,-18+bob,-26,14+bob);c.bezierCurveTo(-24,22+bob,-16,24+bob,-13,18+bob);c.bezierCurveTo(-11,10+bob,-16,-8+bob,-10,-26+bob);c.closePath();c.fill();
+      c.beginPath();c.moveTo(13,-60+bob);c.bezierCurveTo(24,-46+bob,30,-18+bob,26,14+bob);c.bezierCurveTo(24,22+bob,16,24+bob,13,18+bob);c.bezierCurveTo(11,10+bob,16,-8+bob,10,-26+bob);c.closePath();c.fill();
+      c.fillStyle='#5D4037';c.beginPath();c.ellipse(0,-58+bob,19,11,0,0,Math.PI*2);c.fill();
+      c.fillStyle='#8D6E63';c.beginPath();c.ellipse(-5,-59+bob,8,5,-.28,0,Math.PI*2);c.fill();
+      // Eyes (large beautiful)
+      c.fillStyle='white';c.beginPath();c.ellipse(-6.5,-44+bob,7.5,5.5,-.08,0,Math.PI*2);c.fill();
+      c.beginPath();c.ellipse(6.5,-44+bob,7.5,5.5,.08,0,Math.PI*2);c.fill();
+      c.fillStyle='#26C6DA';c.beginPath();c.arc(-6,-44+bob,4.8,0,Math.PI*2);c.fill();
+      c.beginPath();c.arc(6,-44+bob,4.8,0,Math.PI*2);c.fill();
+      c.fillStyle='#0D1117';c.beginPath();c.arc(-5,-44+bob,2.6,0,Math.PI*2);c.fill();
+      c.beginPath();c.arc(7,-44+bob,2.6,0,Math.PI*2);c.fill();
+      c.fillStyle='white';c.beginPath();c.arc(-3.5,-45.5+bob,1.3,0,Math.PI*2);c.fill();
+      c.beginPath();c.arc(8.5,-45.5+bob,1.3,0,Math.PI*2);c.fill();
+      // Eyelashes
+      c.strokeStyle='#111';c.lineWidth=1.1;
+      for(let eli=0;eli<4;eli++){c.beginPath();c.moveTo(-12.5+eli*3,-49+bob);c.lineTo(-13+eli*3,-53+bob);c.stroke();}
+      for(let eli=0;eli<4;eli++){c.beginPath();c.moveTo(2+eli*3,-49+bob);c.lineTo(1.5+eli*3,-53+bob);c.stroke();}
+      // Blush
+      c.fillStyle='#FF8A80';c.globalAlpha=.38;
+      c.beginPath();c.ellipse(-13,-41+bob,5.5,3.5,0,0,Math.PI*2);c.fill();
+      c.beginPath();c.ellipse(13,-41+bob,5.5,3.5,0,0,Math.PI*2);c.fill();
+      c.globalAlpha=1;
+      // Nose
+      c.fillStyle='#FFAB91';c.beginPath();c.arc(0,-38+bob,2.8,0,Math.PI*2);c.fill();
+      // Lips
+      c.fillStyle='#E91E63';c.beginPath();c.moveTo(-6.5,-31+bob);c.bezierCurveTo(-3,-28+bob,3,-28+bob,6.5,-31+bob);c.bezierCurveTo(3,-29.5+bob,-3,-29.5+bob,-6.5,-31+bob);c.closePath();c.fill();
+      c.fillStyle='#F48FB1';c.beginPath();c.moveTo(-5,-31+bob);c.bezierCurveTo(-2,-29.5+bob,2,-29.5+bob,5,-31+bob);c.bezierCurveTo(2,-30.5+bob,-2,-30.5+bob,-5,-31+bob);c.closePath();c.fill();
+      // Golden tiara / crown
+      c.fillStyle='#FFD700';
+      c.beginPath();c.moveTo(-13,-61+bob);c.lineTo(-9,-70+bob);c.lineTo(-4,-63+bob);c.lineTo(0,-74+bob);c.lineTo(4,-63+bob);c.lineTo(9,-70+bob);c.lineTo(13,-61+bob);c.closePath();c.fill();
+      c.strokeStyle='#FFA000';c.lineWidth=1;c.stroke();
+      // Crown gems
+      c.fillStyle='#E91E63';c.beginPath();c.arc(0,-72+bob,2.8,0,Math.PI*2);c.fill();
+      c.fillStyle='#26C6DA';c.beginPath();c.arc(-9,-68+bob,2.2,0,Math.PI*2);c.fill();
+      c.beginPath();c.arc(9,-68+bob,2.2,0,Math.PI*2);c.fill();
+      // Magic sparkle halo
+      for(let mi=0;mi<6;mi++){
+        const ma=af*.06+mi*Math.PI/3;
+        const mx=Math.cos(ma)*32, my=Math.sin(ma)*22-20+bob;
+        c.fillStyle=mi%2===0?'#FFD700':'#FF69B4';c.globalAlpha=.55+Math.sin(ma)*.35;
+        c.beginPath();c.arc(mx,my,2.5,0,Math.PI*2);c.fill();
+        c.strokeStyle=mi%2===0?'#FFD700':'#FF69B4';c.lineWidth=1.2;
+        c.beginPath();c.moveTo(mx-3,my);c.lineTo(mx+3,my);c.stroke();
+        c.beginPath();c.moveTo(mx,my-3);c.lineTo(mx,my+3);c.stroke();
       }
       c.globalAlpha=1;
       break;}
@@ -1403,8 +1711,8 @@ function drawHUD(c,lvl){
   c.fillText(`${Math.floor(elapsed)}s`,VW/2,43);
   c.font='700 11px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.6)';
   c.fillText('TIME',VW/2,57);
-  c.textAlign='right';c.font='800 13px Nunito,sans-serif';c.fillStyle=LEVELS[Math.min(lvlIdx,5)].color;
-  c.fillText(LEVELS[Math.min(lvlIdx,5)].name,VW-18,38);
+  c.textAlign='right';c.font='800 13px Nunito,sans-serif';c.fillStyle=LEVELS[Math.min(lvlIdx,8)].color;
+  c.fillText(LEVELS[Math.min(lvlIdx,8)].name,VW-18,38);
   c.font='700 11px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.6)';
   c.fillText(`Lv.${lvlIdx+1} · ⚡${Math.round(curSpd()/BASE_SPD*10)/10}x`,VW-18,55);
   // UFO flying timer bar
@@ -1458,7 +1766,7 @@ function drawGameOver(c){
   c.textAlign='center';
   c.font='900 34px Nunito,sans-serif';c.fillStyle='#fff';c.fillText('Game Over 🌱',VW/2,328);
   c.font='700 15px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.65)';
-  c.fillText(`⏱ ${Math.floor(elapsed)}s  •  ${LEVELS[Math.min(lvlIdx,5)].name}`,VW/2,363);
+  c.fillText(`⏱ ${Math.floor(elapsed)}s  •  ${LEVELS[Math.min(lvlIdx,8)].name}`,VW/2,363);
   c.font='800 22px Nunito,sans-serif';c.fillStyle='#FFD740';c.fillText(`🪙 +${sessionTok} Tokens`,VW/2,398);
   c.font='700 14px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.45)';c.fillText(`Best: ${bestScore}s`,VW/2,430);
   if(canRevive){
