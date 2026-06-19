@@ -106,8 +106,9 @@ function save(){
 
 // ── Game State ────────────────────────────────────────
 let GS='HOME';
-let elapsed=0,lvlIdx=0,lives=3,sessionTok=0;
+let elapsed=0,lvlIdx=0,lives=3,sessionTok=0,sessionDiamonds=0;
 let isFirst=true,canRevive=false,revived=false;
+let nextBoxTime=25;  // first mystery box at 25s
 let frameN=0,lastSpawn=0;
 let flashTimer=0,flashName='',shake=0;
 let breathTimer=0;
@@ -125,7 +126,7 @@ function mkPlayer(){
   return{
     lane:1,x:LANES[1],targetX:LANES[1],
     y:PLAYER_Y,vy:0,onGnd:true,dead:false,blink:0,animF:0,
-    sqX:1,sqY:1,sliding:false,slideTimer:0,shieldOn:false,moving:false,
+    sqX:1,sqY:1,sliding:false,slideTimer:0,shieldOn:false,shieldTimer:0,moving:false,
     flying:false,flyTimer:0,   // UFO power-up state
     dx:LANES[1],dy:PLAYER_Y,dvx:0,dvy:-10,dAngle:0,
   };
@@ -296,7 +297,7 @@ function startGame(){
   flashTimer=0;shake=0;lastSpawn=0;
   breathTimer=0;postPotholeGap=0;
   lastUfoTime=-30;lastPotholeTime=0;lastAerialSpawn=0;
-  lives=3; sessionTok=0;
+  lives=3; sessionTok=0; sessionDiamonds=0; nextBoxTime=25;
   obstacles=[];coins=[];particles=[];bgObjs=[];
   revived=false;canRevive=false;
   P=mkPlayer(); buttons=[];
@@ -341,6 +342,10 @@ function preloadRoad(){
   spawnCoinsAllLanes(690);
   // Zone F: z=790 — one more coin wave right at spawn horizon
   spawnCoinsAllLanes(790);
+  // Sprinkle initial diamonds — feel rewarding right away
+  spawnDiamond(260,1);
+  spawnDiamond(480,0);
+  spawnDiamond(670,2);
 }
 
 function spawnRow(){
@@ -393,6 +398,13 @@ function spawnRow(){
   else                           obstacles.push(mkObs(Math.floor(Math.random()*3),z,pickObsType(),spd));
 
   spawnCoins(z);
+
+  // 28% chance: scatter 1-2 diamonds alongside the row
+  if(Math.random()<0.28){
+    const dl=Math.floor(Math.random()*3);
+    for(let di=0;di<1+Math.floor(Math.random()*2);di++)
+      spawnDiamond(z-35-di*85,dl);
+  }
 }
 
 function spawnStagger(z,spd){
@@ -413,6 +425,18 @@ function spawnCoinsAllLanes(z){
     for(let i=0;i<4;i++)
       coins.push({lane,z:z-i*60,r:13,got:false,bouncePh:i*.5+lane*0.25,type:'coin'});
   }
+}
+function spawnDiamond(z,lane){
+  const l=lane!==undefined?lane:Math.floor(Math.random()*3);
+  coins.push({lane:l,z,r:14,got:false,bouncePh:Math.random()*Math.PI,type:'diamond'});
+}
+
+function shieldAbsorb(o){
+  o.active=false;
+  P.shieldTimer=0;P.shieldOn=false;
+  P.blink=90;shake=12;
+  sfx('lvlup');
+  addPart(P.x,P.y,24,['#64FFDA','#FFD700','#80DEEA','#fff','#B2EBF2'],true);
 }
 
 function pickObsType(){
@@ -539,6 +563,13 @@ function update(dt){
   if(flashTimer>0)flashTimer--;
   if(breathTimer>0)breathTimer--;
   if(postPotholeGap>0)postPotholeGap--;
+  if(P.shieldTimer>0){P.shieldTimer--;P.shieldOn=P.shieldTimer>0;}
+
+  // Mystery box spawn (first at 25s, then every 22-40s)
+  if(!P.dead&&elapsed>=nextBoxTime){
+    nextBoxTime=elapsed+22+Math.floor(Math.random()*18);
+    coins.push({lane:Math.floor(Math.random()*3),z:820+Math.random()*80,r:18,got:false,bouncePh:0,type:'box'});
+  }
 
   // Aerial obstacle spawn when flying (staggered, ~1.5s apart)
   if(P.flying&&P.flyTimer>60&&frameN-lastAerialSpawn>=80){
@@ -588,24 +619,37 @@ function update(dt){
       if(o.lane!==P.lane)continue;
       if(o.aerial&&!P.flying)continue;  // aerial obs, player on ground → safe
       if(!o.aerial&&P.flying)continue;  // ground obs, player flying → safe
-      if(o.aerial){playerDie();return;}  // aerial hit → always dies
+      if(o.aerial){
+        if(P.shieldTimer>0){shieldAbsorb(o);return;}
+        playerDie();return;
+      }
       // Ground obstacle logic
       if(o.type==='tall'&&P.sliding)continue;               // slide under tall
       if((o.type==='low'||o.type==='pothole')&&P.y<PLAYER_Y-22)continue; // jump over low/pothole
-      if(Math.abs(py-PLAYER_Y)<pr+o.h/2){playerDie();return;}
+      if(Math.abs(py-PLAYER_Y)<pr+o.h/2){
+        if(P.shieldTimer>0){shieldAbsorb(o);return;}
+        playerDie();return;
+      }
     }
 
-    // Coins + UFO pickup
+    // Coins + pickups
     for(const c of coins){
       if(c.got)continue;
       if(c.lane!==P.lane)continue;
       if(c.z>60||c.z<-30)continue;
       c.got=true;
-      if(c.type==='ufo'&&!P.flying){
+      if(c.type==='diamond'){
+        sessionDiamonds++;sessionTok+=2;sfx('coin');
+        addPart(LANES[c.lane],GROUND_Y-50,10,['#64FFDA','#80DEEA','#B2EBF2','#fff'],true);
+      } else if(c.type==='box'){
+        P.shieldTimer=10*60;P.shieldOn=true;
+        sfx('lvlup');
+        addPart(P.x,P.y,22,['#FFD700','#FF8F00','#FFE57F','#64FFDA','#fff'],true);
+      } else if(c.type==='ufo'&&!P.flying){
         P.flying=true;P.flyTimer=15*60; // 15 seconds flight
         sfx('lvlup');
         addPart(P.x,P.y,16,['#64B5F6','#90CAF9','#CE93D8','#fff'],true);
-      } else if(c.type!=='ufo'){
+      } else if(c.type==='coin'){
         sessionTok++;sfx('coin');
         addPart(LANES[c.lane],GROUND_Y-50,6,['#FFD740','#FFEC80','#FFF9C4'],true);
       }
@@ -950,7 +994,62 @@ function drawPlay(c){
       c.fillStyle='#fff';c.font=`bold ${Math.max(9,12*scale)}px Nunito,sans-serif`;
       c.textAlign='center';c.textBaseline='middle';
       c.fillText('🛸',sx,sy-2*scale);c.textBaseline='alphabetic';
+    } else if(coin.type==='diamond'){
+      // 💎 Diamond gem
+      c.save();c.translate(sx,sy+Math.sin(coin.bouncePh)*3*scale);
+      const dr=coin.r*scale*1.7;
+      // Glow halo
+      c.globalAlpha=0.35+Math.sin(frameN*.07+coin.bouncePh)*.18;
+      c.fillStyle='#64FFDA';
+      c.beginPath();c.arc(0,0,dr*1.55,0,Math.PI*2);c.fill();
+      c.globalAlpha=1;
+      // Diamond body (4-point faceted)
+      const dg=c.createLinearGradient(-dr,-dr,dr,dr);
+      dg.addColorStop(0,'#E0F7FA');dg.addColorStop(.3,'#64FFDA');dg.addColorStop(.6,'#26C6DA');dg.addColorStop(1,'#0097A7');
+      c.beginPath();
+      c.moveTo(0,-dr*1.1);   // top
+      c.lineTo(dr*.75,-dr*.1);// right-top
+      c.lineTo(dr*.6, dr*.85);// right-bottom
+      c.lineTo(0, dr*1.0);   // bottom
+      c.lineTo(-dr*.6,dr*.85);// left-bottom
+      c.lineTo(-dr*.75,-dr*.1);// left-top
+      c.closePath();
+      c.fillStyle=dg;c.fill();
+      c.strokeStyle='#00BCD4';c.lineWidth=0.8*scale;c.stroke();
+      // Inner facet highlight
+      c.fillStyle='rgba(255,255,255,0.65)';
+      c.beginPath();c.moveTo(0,-dr*.75);c.lineTo(dr*.38,-dr*.05);c.lineTo(0,dr*.3);c.lineTo(-dr*.38,-dr*.05);c.closePath();c.fill();
+      // ×2 label
+      c.fillStyle='#007C91';c.font=`900 ${Math.max(6,8*scale)}px Nunito,sans-serif`;
+      c.textAlign='center';c.textBaseline='middle';c.fillText('×2',0,dr*.55);
+      c.restore();
+    } else if(coin.type==='box'){
+      // 📦 Mystery box
+      c.save();c.translate(sx,sy+Math.sin(coin.bouncePh)*4*scale);
+      const bw=20*scale,bh=20*scale;
+      // Pulsing outer glow
+      c.globalAlpha=0.38+Math.sin(frameN*.08)*.2;
+      c.fillStyle='#FFD700';
+      c.beginPath();c.arc(0,0,bw*1.7,0,Math.PI*2);c.fill();
+      c.globalAlpha=1;
+      // Box body
+      const bxg=c.createLinearGradient(-bw,-bh,bw,bh);
+      bxg.addColorStop(0,'#FF8F00');bxg.addColorStop(.45,'#FFD600');bxg.addColorStop(1,'#E65100');
+      rrect(c,-bw,-bh,bw*2,bh*2,4*scale,bxg);
+      c.strokeStyle='#FF6F00';c.lineWidth=1.2*scale;
+      rrect(c,-bw,-bh,bw*2,bh*2,4*scale,null,'#FF6F00');
+      // Lid stripe
+      c.fillStyle='#BF360C';c.fillRect(-bw,-bh,bw*2,bh*.32);
+      // Red ribbon
+      c.fillStyle='#E53935';
+      c.fillRect(-2.5*scale,-bh,5*scale,bh*2);
+      c.fillRect(-bw,-2.5*scale,bw*2,5*scale);
+      // ?
+      c.fillStyle='#fff';c.font=`900 ${Math.max(10,15*scale)}px Nunito,sans-serif`;
+      c.textAlign='center';c.textBaseline='middle';c.fillText('?',0,bh*.18);
+      c.restore();
     } else {
+      // 🪙 Gold coin
       const cr=coin.r*scale*1.6;
       c.save();c.translate(sx,sy);
       c.beginPath();c.arc(0,0,cr,0,Math.PI*2);
@@ -1739,20 +1838,30 @@ function drawHUD(c,lvl){
   c.fillText(LEVELS[Math.min(lvlIdx,8)].name,VW-18,38);
   c.font='700 11px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.6)';
   c.fillText(`Lv.${lvlIdx+1} · ⚡${Math.round(curSpd()/BASE_SPD*10)/10}x`,VW-18,55);
-  // UFO flying timer bar
-  if(P.flying){
-    const ratio=P.flyTimer/(15*60);
-    const bw=VW-20, bh=7;
-    rrect(c,10,72,bw,bh,3,'rgba(0,0,0,.3)');
-    const fg=c.createLinearGradient(10,0,10+bw*ratio,0);
-    fg.addColorStop(0,'#64B5F6');fg.addColorStop(1,'#CE93D8');
-    rrect(c,10,72,bw*ratio,bh,3,fg);
-    c.textAlign='left';c.font='700 10px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.7)';
-    c.fillText('🛸 Flying',18,97);
-  } else {
-    rrect(c,10,76,105,30,10,'rgba(0,0,0,.2)');
-    c.textAlign='left';c.font='800 15px Nunito,sans-serif';c.fillStyle='#FFD740';
-    c.fillText(`🪙 ${sessionTok}`,18,97);
+  // Status strip: 🪙 coins  💎 diamonds  |  power-up bar
+  rrect(c,10,72,VW-20,32,10,'rgba(0,0,0,.26)');
+  c.textAlign='left';c.font='800 14px Nunito,sans-serif';c.fillStyle='#FFD740';
+  c.fillText(`🪙 ${sessionTok}`,18,92);
+  if(sessionDiamonds>0){
+    c.fillStyle='#64FFDA';c.font='800 13px Nunito,sans-serif';
+    c.fillText(`💎 ${sessionDiamonds}`,85,92);
+  }
+  // Power-up bar on right side (shield takes priority over flying)
+  const hasPow=P.shieldTimer>0||P.flying;
+  if(hasPow){
+    const isShield=P.shieldTimer>0;
+    const ratio=isShield?P.shieldTimer/(10*60):P.flyTimer/(15*60);
+    const c1=isShield?'#64FFDA':'#64B5F6',c2=isShield?'#FFD700':'#CE93D8';
+    const lbl=isShield?`🛡 ${Math.ceil(P.shieldTimer/60)}s`:`🛸 ${Math.ceil(P.flyTimer/60)}s`;
+    const bx=sessionDiamonds>0?152:112,bw=VW-bx-18,barH=8;
+    rrect(c,bx,79,bw,barH,4,'rgba(0,0,0,.38)');
+    if(ratio>0.01){
+      const pg=c.createLinearGradient(bx,0,bx+bw*ratio,0);
+      pg.addColorStop(0,c1);pg.addColorStop(1,c2);
+      rrect(c,bx,79,bw*ratio,barH,4,pg);
+    }
+    c.textAlign='right';c.font='700 10px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.78)';
+    c.fillText(lbl,VW-14,97);
   }
 }
 
@@ -1792,7 +1901,13 @@ function drawGameOver(c){
   c.font='700 15px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.65)';
   c.fillText(`⏱ ${Math.floor(elapsed)}s  •  ${LEVELS[Math.min(lvlIdx,8)].name}`,VW/2,363);
   c.font='800 22px Nunito,sans-serif';c.fillStyle='#FFD740';c.fillText(`🪙 +${sessionTok} Tokens`,VW/2,398);
-  c.font='700 14px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.45)';c.fillText(`Best: ${bestScore}s`,VW/2,430);
+  if(sessionDiamonds>0){
+    c.font='800 18px Nunito,sans-serif';c.fillStyle='#64FFDA';
+    c.fillText(`💎 ${sessionDiamonds} Diamond${sessionDiamonds>1?'s':''}`,VW/2,426);
+    c.font='700 14px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.45)';c.fillText(`Best: ${bestScore}s`,VW/2,452);
+  } else {
+    c.font='700 14px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.45)';c.fillText(`Best: ${bestScore}s`,VW/2,430);
+  }
   if(canRevive){
     c.font='700 13px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.55)';
     c.fillText('Watch an ad to keep going!',VW/2,462);
