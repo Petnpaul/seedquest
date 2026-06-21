@@ -70,15 +70,29 @@ const LANE_SPEED=14; // px/frame for lane switch
 const BASE_SPD=6;
 
 const LEVELS=[
-  {name:'Sprout',      color:'#69D36B',endT:40, spd:1.0, iv:145}, // chill intro
-  {name:'Seedling',    color:'#FFF176',endT:90, spd:1.1, iv:122}, // slight bump
-  {name:'Young Tree',  color:'#FFB74D',endT:150,spd:1.22,iv:105}, // gentle ramp
-  {name:'Strong Tree', color:'#EF9A9A',endT:220,spd:1.38,iv:90},
-  {name:'Ancient Tree',color:'#CE93D8',endT:300,spd:1.58,iv:78},
-  {name:'Legendary',   color:'#FF80AB',endT:400,spd:1.8, iv:68},
-  {name:'King Kong',   color:'#8D6E63',endT:520,spd:2.0, iv:60},
-  {name:'Godzilla',    color:'#64FFDA',endT:660,spd:2.25,iv:55},
+  {name:'Sprout',      color:'#69D36B',endT:14, spd:1.0, iv:145}, // chill intro
+  {name:'Seedling',    color:'#FFF176',endT:30, spd:1.1, iv:122}, // slight bump
+  {name:'Young Tree',  color:'#FFB74D',endT:50, spd:1.22,iv:105}, // gentle ramp
+  {name:'Strong Tree', color:'#EF9A9A',endT:72, spd:1.38,iv:90},
+  {name:'Ancient Tree',color:'#CE93D8',endT:96, spd:1.58,iv:78},
+  {name:'Legendary',   color:'#FF80AB',endT:122,spd:1.8, iv:68},
+  {name:'King Kong',   color:'#8D6E63',endT:150,spd:2.0, iv:60},
+  {name:'Godzilla',    color:'#64FFDA',endT:180,spd:2.25,iv:55},
   {name:'Dream Girl',  color:'#FF69B4',endT:Infinity,spd:2.5,iv:50},
+];
+const L9_START=180; // Dream Girl begins here — single source of truth, ~3min tour
+const REMIX_CYCLE=45; // infinite realm changes every 45s past L9_START
+
+// Infinite remix realms — cycle every REMIX_CYCLE seconds once past L9_START.
+// Cheap to add, keeps "what's next" alive without new costumes: just
+// reskins the sky/particle palette and gives a name + bonus diamond.
+const REMIX_THEMES=[
+  {name:'Aurora Dream',  sky:['#FF69B4','#7C4DFF']},
+  {name:'Sunset Mirage', sky:['#FF8A65','#AD1457']},
+  {name:'Cosmic Dream',  sky:['#1A237E','#D500F9']},
+  {name:'Crystal Dream', sky:['#80DEEA','#0097A7']},
+  {name:'Golden Dream',  sky:['#FFD54F','#E65100']},
+  {name:'Midnight Dream',sky:['#0D1117','#4A148C']},
 ];
 
 const SKINS=[
@@ -95,14 +109,61 @@ const SKINS=[
 // ── Persistent State ──────────────────────────────────
 let bestScore  =+localStorage.getItem('sq3_best') ||0;
 let totalTok   =+localStorage.getItem('sq3_total')||0;
+let totalDia   =+localStorage.getItem('sq3_dia')  ||0;
+let reviveTok  =+localStorage.getItem('sq3_rvtk') ||0;
 let curSkin    =+localStorage.getItem('sq3_skin') ||0;
 let unlocked   =JSON.parse(localStorage.getItem('sq3_skins')||'[0]');
+let perks      =JSON.parse(localStorage.getItem('sq3_perks')||'{}'); // {luckyStart:true}
 function save(){
   localStorage.setItem('sq3_best', bestScore);
   localStorage.setItem('sq3_total',totalTok);
+  localStorage.setItem('sq3_dia',  totalDia);
+  localStorage.setItem('sq3_rvtk',reviveTok);
   localStorage.setItem('sq3_skin', curSkin);
   localStorage.setItem('sq3_skins',JSON.stringify(unlocked));
+  localStorage.setItem('sq3_perks',JSON.stringify(perks));
 }
+
+// ── Shop Items ────────────────────────────────────────
+// Skins 2,4,7 are diamond-only (never unlocked via level progress)
+const SHOP_SKINS=[
+  {id:2,cost:30},{id:4,cost:50},{id:7,cost:80},
+];
+const SHOP_PERKS=[
+  {id:'luckyStart',name:'🛡 Lucky Start',desc:'Begin every run with a 5s shield',cost:60},
+];
+const REVIVE_COST=15; // diamonds per revive token
+
+// ── Daily Missions ────────────────────────────────────
+const MISSION_POOL=[
+  {id:'coins50', name:'Collect 50 coins in one run', goal:50, icon:'🪙', track:'runCoins'},
+  {id:'dia5',    name:'Collect 5 diamonds in one run',goal:5,  icon:'💎', track:'runDia'},
+  {id:'survive90',name:'Survive 90 seconds in one run',goal:90,icon:'⏱',  track:'runTime'},
+  {id:'box2',    name:'Open 2 mystery boxes today',    goal:2,  icon:'📦', track:'dayBoxes'},
+  {id:'kingkong',name:'Reach the King Kong level',      goal:1,  icon:'🦍', track:'runKK'},
+  {id:'combo3',  name:'Reach a x3 combo in one run',    goal:3,  icon:'🔥', track:'runCombo'},
+];
+function todayKey(){return new Date().toISOString().slice(0,10);}
+function loadDaily(){
+  let d=JSON.parse(localStorage.getItem('sq3_daily')||'null');
+  const tk=todayKey();
+  if(!d||d.date!==tk){
+    // Pick 3 deterministic missions for the day (seeded by date string)
+    let seed=0;for(let i=0;i<tk.length;i++)seed=(seed*31+tk.charCodeAt(i))>>>0;
+    const pool=[...MISSION_POOL];
+    const picks=[];
+    for(let i=0;i<3;i++){
+      seed=(seed*1103515245+12345)>>>0;
+      const idx=seed%pool.length;
+      picks.push(pool.splice(idx,1)[0].id);
+    }
+    d={date:tk,missions:picks.map(id=>({id,progress:0,claimed:false})),boxesOpened:0};
+    localStorage.setItem('sq3_daily',JSON.stringify(d));
+  }
+  return d;
+}
+let daily=loadDaily();
+function saveDaily(){localStorage.setItem('sq3_daily',JSON.stringify(daily));}
 
 // ── Game State ────────────────────────────────────────
 let GS='HOME';
@@ -119,6 +180,12 @@ let lastAerialSpawn=0;
 let obstacles=[],coins=[],particles=[],bgObjs=[];
 let buttons=[];
 let scrollZ=0;
+// Combo system
+let comboCount=0,comboTimer=0,comboMax=1;
+// Run-level mission tracking
+let runMaxCombo=0,runBoxesOpened=0,runHitKK=false,runCoinsOnly=0;
+// Infinite remix (post Level 9)
+let remixIdx=-1;
 
 // ── Player ────────────────────────────────────────────
 let P;
@@ -139,11 +206,11 @@ function mkPlayer(){
 // → Both actions are fully independent — no interference
 
 let tx0=0,ty0=0,tActive=false;
-let tRefX=0;                  // điểm gốc để tính moved
+let tRefX=0;                  // reference point to compute movement
 let tLaneCooldown=0;          // timestamp of last lane change
 const LANE_THR    = 38;       // px drag to trigger lane switch
 const LANE_CD_MS  = 200;      // ms between lane switches (prevents skipping lanes)
-const JUMP_MIN    = 22;       // px vuốt dọc tối thiểu để jump/slide
+const JUMP_MIN    = 22;       // min vertical swipe px to jump/slide
 
 function getPos(e){
   const r=CV.getBoundingClientRect();
@@ -199,11 +266,11 @@ function onTU(e){
   if(GS!=='PLAYING'||P.dead)return;
   const pos=getPos(e);
   const ddx=Math.abs(pos.x-tx0);
-  const ddy=ty0-pos.y;   // dương = vuốt lên
+  const ddy=ty0-pos.y;   // positive = swiped up
 
-  // Jump khi vuốt lên đủ xa và không quá nghiêng ngang
+  // Jump when swiped up far enough and not too diagonal
   if(Math.abs(ddy)<JUMP_MIN)return;
-  if(ddx>Math.abs(ddy)*1.8)return; // cho phép lệch ngang đến 80%
+  if(ddx>Math.abs(ddy)*1.8)return; // allow up to 80% horizontal drift
 
   if(ddy>0){
     if(P.onGnd&&!P.sliding){doJump();sfx('jump');}
@@ -271,18 +338,19 @@ function rrect(c,x,y,w,h,r,fill,stroke){
   if(stroke){c.strokeStyle=stroke;c.lineWidth=1.5;c.stroke();}
 }
 function getLvl(t){
-  if(t<40)return 0;if(t<90)return 1;if(t<150)return 2;
-  if(t<220)return 3;if(t<300)return 4;if(t<400)return 5;
-  if(t<520)return 6;if(t<660)return 7;return 8;
+  if(t<14)return 0;if(t<30)return 1;if(t<50)return 2;
+  if(t<72)return 3;if(t<96)return 4;if(t<122)return 5;
+  if(t<150)return 6;if(t<180)return 7;return 8;
 }
 function curSpd(){
   const base=LEVELS[Math.min(lvlIdx,8)].spd;
-  const lateBonus=elapsed>180?Math.floor((elapsed-180)/60)*0.15:0;
   if(lvlIdx>=8){
-    const legBonus=Math.max(0,Math.floor((elapsed-660)/60))*.08;
-    return(base+legBonus+lateBonus)*BASE_SPD;
+    // Infinite realm: speed ticks up every remix cycle, tied to the same
+    // 45s cadence as the visual theme change — escalation feels deliberate.
+    const legBonus=Math.max(0,Math.floor((elapsed-L9_START)/REMIX_CYCLE))*.08;
+    return(base+legBonus)*BASE_SPD;
   }
-  return(base+lateBonus)*BASE_SPD;
+  return base*BASE_SPD;
 }
 function spawnIv(){
   const base=Math.max(50,LEVELS[Math.min(lvlIdx,8)].iv-frameN*.005);
@@ -298,9 +366,13 @@ function startGame(){
   breathTimer=0;postPotholeGap=0;
   lastUfoTime=-30;lastPotholeTime=0;lastAerialSpawn=0;
   lives=3; sessionTok=0; sessionDiamonds=0; nextBoxTime=25;
+  comboCount=0;comboTimer=0;comboMax=1;
+  runMaxCombo=0;runBoxesOpened=0;runHitKK=false;runCoinsOnly=0;
+  remixIdx=-1;
   obstacles=[];coins=[];particles=[];bgObjs=[];
   revived=false;canRevive=false;
   P=mkPlayer(); buttons=[];
+  if(perks.luckyStart){P.shieldTimer=5*60;P.shieldOn=true;}
   initBG();
   preloadRoad(); // seed road with coins + obstacles from frame 1
 }
@@ -435,6 +507,7 @@ function shieldAbsorb(o){
   o.active=false;
   P.shieldTimer=0;P.shieldOn=false;
   P.blink=90;shake=12;
+  comboCount=0;comboTimer=0;comboMax=1;
   sfx('lvlup');
   addPart(P.x,P.y,24,['#64FFDA','#FFD700','#80DEEA','#fff','#B2EBF2'],true);
 }
@@ -457,19 +530,27 @@ function mkObs(lane,z,type,spd){
 
 function playerDie(){
   if(P.dead||P.blink>0)return;
-  if(P.shieldOn){P.shieldOn=false;sfx('shield');addPart(P.x,P.y,14,['#FFD740','#64B5F6'],true);return;}
   sfx('die');shake=20;P.dead=true;
+  comboCount=0;comboTimer=0;comboMax=1;
   P.dx=P.x;P.dy=P.y;P.dvx=(Math.random()-.5)*4;P.dvy=-11;P.dAngle=0;
   addPart(P.x,P.y,20,['#EF5350','#FFCDD2','#FF8A65'],true);
   lives--;
   setTimeout(()=>{
     if(lives<=0){
       canRevive=true; // Always show Watch Ad when lives run out
-      if(Math.floor(elapsed)>bestScore){bestScore=Math.floor(elapsed);save();}
-      totalTok+=sessionTok;save();
+      if(Math.floor(elapsed)>bestScore){bestScore=Math.floor(elapsed);}
+      finishRun(); // flush tok/diamonds, evaluate missions — single source of truth
       shake=0;GS='GAMEOVER';buildGOBtns();
     }else respawn();
   },1400);
+}
+
+function finishRun(){
+  // Called exactly once per run-end to avoid double-counting totals
+  totalTok+=sessionTok;
+  totalDia+=sessionDiamonds;
+  evalMissionProgress();
+  save();
 }
 
 function respawn(){
@@ -487,13 +568,22 @@ function doRevive(){
   obstacles=obstacles.filter(o=>o.z>100);
   sfx('lvlup');GS='PLAYING';isFirst=false;buttons=[];
 }
-function goHome(){totalTok+=sessionTok;save();isFirst=false;GS='HOME';buttons=[];shake=0;}
+function goHome(){isFirst=false;GS='HOME';buttons=[];shake=0;daily=loadDaily();}
 
 function buildGOBtns(){
   buttons=[];
   const bx=85;
-  if(canRevive)buttons.push({x:bx,y:492,w:VW-bx*2,h:62,label:'📺  Watch Ad to Continue',style:'green',fn:doRevive});
-  buttons.push({x:bx,y:canRevive?574:510,w:VW-bx*2,h:54,label:'🏠  Back to Home',style:'ghost',fn:goHome});
+  const triple=canRevive&&reviveTok>0;
+  let y=492;
+  if(canRevive){
+    buttons.push({x:bx,y,w:VW-bx*2,h:triple?54:62,label:'📺  Watch Ad to Continue',style:'green',fn:doRevive});
+    y+=(triple?54:62)+8;
+    if(reviveTok>0){
+      buttons.push({x:bx,y,w:VW-bx*2,h:50,label:`💎  Use Free Revive (${reviveTok})`,style:'cyan',fn:doReviveFree});
+      y+=58;
+    }
+  }
+  buttons.push({x:bx,y,w:VW-bx*2,h:50,label:'🏠  Back to Home',style:'ghost',fn:goHome});
 }
 
 function cycleSkin(){
@@ -501,10 +591,61 @@ function cycleSkin(){
   curSkin=unlocked[(i+1)%unlocked.length];save();
 }
 
+// ── Shop Actions ──────────────────────────────────────
+function buySkin(id,cost){
+  if(unlocked.includes(id)||totalDia<cost)return;
+  totalDia-=cost;unlocked.push(id);curSkin=id;save();sfx('lvlup');
+}
+function buyPerk(id,cost){
+  if(perks[id]||totalDia<cost)return;
+  totalDia-=cost;perks[id]=true;save();sfx('lvlup');
+}
+function buyRevive(){
+  if(totalDia<REVIVE_COST)return;
+  totalDia-=REVIVE_COST;reviveTok++;save();sfx('lvlup');
+}
+function doReviveFree(){
+  if(reviveTok<=0)return;
+  reviveTok--;save();
+  lives=2;
+  P=mkPlayer();P.blink=240;
+  obstacles=obstacles.filter(o=>o.z>100);
+  sfx('lvlup');GS='PLAYING';isFirst=false;buttons=[];
+}
+function openShop(){GS='SHOP';buttons=[];}
+function openMissions(){daily=loadDaily();GS='MISSIONS';buttons=[];}
+
 function checkUnlocks(){
   [[1,lvlIdx>=1],[3,lvlIdx>=2],[5,lvlIdx>=3],[6,lvlIdx>=4]].forEach(([id,c])=>{
     if(c&&!unlocked.includes(id)){unlocked.push(id);save();}
   });
+}
+
+// ── Daily Missions: progress + claim ──────────────────
+function evalMissionProgress(){
+  daily.missions.forEach(m=>{
+    const def=MISSION_POOL.find(p=>p.id===m.id);
+    if(!def||m.claimed)return;
+    let val=0;
+    switch(def.track){
+      case 'runCoins': val=runCoinsOnly;break;
+      case 'runDia':   val=sessionDiamonds;break;
+      case 'runTime':  val=Math.floor(elapsed);break;
+      case 'dayBoxes': val=daily.boxesOpened;break;
+      case 'runKK':    val=runHitKK?1:0;break;
+      case 'runCombo': val=runMaxCombo;break;
+    }
+    m.progress=Math.max(m.progress,Math.min(val,def.goal));
+  });
+  saveDaily();
+}
+function claimMission(idx){
+  const m=daily.missions[idx];
+  const def=MISSION_POOL.find(p=>p.id===m.id);
+  if(!def||m.claimed||m.progress<def.goal)return;
+  m.claimed=true;saveDaily();
+  totalDia+=10;save();
+  sfx('lvlup');
 }
 
 // ── Update ────────────────────────────────────────────
@@ -564,6 +705,21 @@ function update(dt){
   if(breathTimer>0)breathTimer--;
   if(postPotholeGap>0)postPotholeGap--;
   if(P.shieldTimer>0){P.shieldTimer--;P.shieldOn=P.shieldTimer>0;}
+  if(comboTimer>0){comboTimer--;if(comboTimer<=0){comboCount=0;comboMax=1;}}
+
+  // Track King Kong+ mission flag and infinite remix realms past Dream Girl
+  if(lvlIdx>=6)runHitKK=true;
+  if(lvlIdx===8){
+    const newRemix=Math.floor((elapsed-L9_START)/REMIX_CYCLE);
+    if(newRemix>remixIdx){
+      remixIdx=newRemix;
+      const rt=REMIX_THEMES[remixIdx%REMIX_THEMES.length];
+      flashTimer=130;flashName='✦ '+rt.name+' ✦';
+      sessionDiamonds++; // bonus diamond for reaching a new infinite realm
+      sfx('lvlup');
+      addPart(VW/2,VH/2,28,['#FF80AB','#64FFDA','#FFD700','#fff'],true);
+    }
+  }
 
   // Mystery box spawn (first at 25s, then every 22-40s)
   if(!P.dead&&elapsed>=nextBoxTime){
@@ -643,6 +799,7 @@ function update(dt){
         addPart(LANES[c.lane],GROUND_Y-50,10,['#64FFDA','#80DEEA','#B2EBF2','#fff'],true);
       } else if(c.type==='box'){
         P.shieldTimer=10*60;P.shieldOn=true;
+        runBoxesOpened++;daily.boxesOpened++;saveDaily();
         sfx('lvlup');
         addPart(P.x,P.y,22,['#FFD700','#FF8F00','#FFE57F','#64FFDA','#fff'],true);
       } else if(c.type==='ufo'&&!P.flying){
@@ -650,7 +807,11 @@ function update(dt){
         sfx('lvlup');
         addPart(P.x,P.y,16,['#64B5F6','#90CAF9','#CE93D8','#fff'],true);
       } else if(c.type==='coin'){
-        sessionTok++;sfx('coin');
+        // Combo: consecutive coins within 1.5s window raise multiplier (cap x5)
+        comboCount++;comboTimer=90;
+        comboMax=Math.min(5,1+Math.floor(comboCount/5));
+        runMaxCombo=Math.max(runMaxCombo,comboMax);
+        sessionTok+=comboMax;runCoinsOnly++;sfx('coin');
         addPart(LANES[c.lane],GROUND_Y-50,6,['#FFD740','#FFEC80','#FFF9C4'],true);
       }
     }
@@ -675,10 +836,22 @@ function draw(){
   const c=CTX;
   c.save();c.scale(SCALE,SCALE);
   if(GS!=='HOME'&&shake>0){c.translate((Math.random()-.5)*shake*.35,(Math.random()-.5)*shake*.35);}
-  if(GS==='HOME')         drawHome(c);
-  else if(GS==='PLAYING') drawPlay(c);
+  if(GS==='HOME')          drawHome(c);
+  else if(GS==='PLAYING')  drawPlay(c);
+  else if(GS==='SHOP')     drawShop(c);
+  else if(GS==='MISSIONS') drawMissions(c);
   else{drawPlay(c);drawGameOver(c);}
   c.restore();
+}
+
+// ── Spirit Tree Stages ─────────────────────────────────
+const TREE_TH=[0,100,300,700,1500,3000,6000];
+const TREE_NAMES=['Sprig','Sapling','Young Tree','Tall Tree','Ancient Tree','Spirit Tree','Legendary'];
+function treeStageInfo(tok){
+  let s=0;for(let i=0;i<TREE_TH.length;i++)if(tok>=TREE_TH[i])s=i;
+  const cur=TREE_TH[s],next=TREE_TH[s+1];
+  return{stage:s,name:TREE_NAMES[s],cur,next,
+    progress:next?(tok-cur)/(next-cur):1, isMax:!next};
 }
 
 // ── Home ──────────────────────────────────────────────
@@ -710,14 +883,176 @@ function drawHome(c){
   c.fillText(`🏆 Best: ${bestScore}s`,VW/2-72,192);
   c.fillText(`🪙 ${totalTok} Tokens`,VW/2+72,192);
 
+  // Diamonds + Spirit Tree growth progress
+  const info=treeStageInfo(totalTok);
+  rrect(c,55,216,VW-110,52,14,'rgba(0,0,0,0.18)');
+  c.font='800 13px Nunito,sans-serif';c.fillStyle='#64FFDA';
+  c.fillText(`💎 ${totalDia}  ·  🌳 ${info.name}`,VW/2,236);
+  const barX=70,barW=VW-140,barY=250,barH=8;
+  rrect(c,barX,barY,barW,barH,4,'rgba(255,255,255,.15)');
+  if(info.isMax){
+    rrect(c,barX,barY,barW,barH,4,'#64FFDA');
+    c.font='700 9px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.7)';
+    c.fillText('MAX',VW/2,266);
+  } else {
+    const pg=c.createLinearGradient(barX,0,barX+barW,0);
+    pg.addColorStop(0,'#81C784');pg.addColorStop(1,'#64FFDA');
+    rrect(c,barX,barY,barW*Math.max(0.03,info.progress),barH,4,pg);
+    c.font='700 9px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.7)';
+    c.fillText(`${totalTok}/${info.next} to next stage`,VW/2,266);
+  }
+
   const py=VH-190;
   drawBtn(c,VW/2-120,py,240,68,'🌟  PLAY  🌟','#43A047','#2E7D32','#fff',26,true);
   drawBtn(c,VW/2-90,py+82,180,50,SKINS[curSkin].n,'rgba(255,255,255,0.22)','rgba(0,0,0,0.15)','#fff',15,false);
 
+  // Shop + Missions row
+  const hasClaimable=daily.missions.some(m=>{
+    const def=MISSION_POOL.find(p=>p.id===m.id);
+    return def&&!m.claimed&&m.progress>=def.goal;
+  });
+  const r2y=py+82+60;
+  drawBtn(c,VW/2-178,r2y,170,46,'🛍️ Shop','rgba(255,255,255,0.22)','rgba(0,0,0,0.15)','#fff',14,false);
+  drawBtn(c,VW/2+8,r2y,170,46,hasClaimable?'📋 Missions ●':'📋 Missions',
+    hasClaimable?'rgba(255,215,64,0.35)':'rgba(255,255,255,0.22)','rgba(0,0,0,0.15)','#fff',14,false);
+
   buttons=[
     {x:VW/2-120,y:py,w:240,h:68,fn:startGame},
     {x:VW/2-90,y:py+82,w:180,h:50,fn:cycleSkin},
+    {x:VW/2-178,y:r2y,w:170,h:46,fn:openShop},
+    {x:VW/2+8,  y:r2y,w:170,h:46,fn:openMissions},
   ];
+}
+
+// ── Shop ──────────────────────────────────────────────
+function drawShop(c){
+  const g=c.createLinearGradient(0,0,0,VH);
+  g.addColorStop(0,'#2A1B3D');g.addColorStop(1,'#1A1025');
+  c.fillStyle=g;c.fillRect(0,0,VW,VH);
+
+  c.textAlign='center';c.font='900 30px Nunito,sans-serif';c.fillStyle='#fff';
+  c.fillText('🛍️ Shop',VW/2,68);
+  c.font='800 15px Nunito,sans-serif';c.fillStyle='#64FFDA';
+  c.fillText(`💎 ${totalDia} Diamonds`,VW/2,96);
+
+  buttons=[];
+  let y=128;
+
+  // Section: Skins
+  c.textAlign='left';c.font='800 13px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.55)';
+  c.fillText('PREMIUM SKINS',30,y);y+=14;
+  for(const item of SHOP_SKINS){
+    const sk=SKINS[item.id];
+    const owned=unlocked.includes(item.id);
+    const equipped=curSkin===item.id;
+    rrect(c,30,y,VW-60,64,14,'rgba(255,255,255,.07)');
+    c.textAlign='left';c.font='800 16px Nunito,sans-serif';c.fillStyle='#fff';
+    c.fillText(sk.n,46,y+28);
+    c.font='700 11px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.5)';
+    c.fillText(owned?(equipped?'Equipped':'Owned — tap to equip'):`Unlock for 💎 ${item.cost}`,46,y+46);
+    const bx=VW-118,bw=88,bh=44,by=y+10;
+    if(owned){
+      drawBtn(c,bx,by,bw,bh,equipped?'✓':'Use',
+        equipped?'rgba(100,255,218,.3)':'rgba(255,255,255,.18)','rgba(0,0,0,.15)','#fff',13,false);
+      buttons.push({x:bx,y:by,w:bw,h:bh,fn:()=>{curSkin=item.id;save();}});
+    } else {
+      const can=totalDia>=item.cost;
+      drawBtn(c,bx,by,bw,bh,`💎${item.cost}`,can?'#7C4DFF':'rgba(255,255,255,.1)',can?'#4A148C':'rgba(0,0,0,.2)','#fff',13,false);
+      if(can)buttons.push({x:bx,y:by,w:bw,h:bh,fn:()=>buySkin(item.id,item.cost)});
+    }
+    y+=74;
+  }
+
+  // Section: Perks
+  y+=8;
+  c.textAlign='left';c.font='800 13px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.55)';
+  c.fillText('PERMANENT UPGRADES',30,y);y+=14;
+  for(const item of SHOP_PERKS){
+    const owned=!!perks[item.id];
+    rrect(c,30,y,VW-60,64,14,'rgba(255,255,255,.07)');
+    c.textAlign='left';c.font='800 16px Nunito,sans-serif';c.fillStyle='#fff';
+    c.fillText(item.name,46,y+28);
+    c.font='700 11px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.5)';
+    c.fillText(owned?'Owned':item.desc,46,y+46);
+    const bx=VW-118,bw=88,bh=44,by=y+10;
+    if(owned){
+      drawBtn(c,bx,by,bw,bh,'✓','rgba(100,255,218,.3)','rgba(0,0,0,.15)','#fff',16,false);
+    } else {
+      const can=totalDia>=item.cost;
+      drawBtn(c,bx,by,bw,bh,`💎${item.cost}`,can?'#7C4DFF':'rgba(255,255,255,.1)',can?'#4A148C':'rgba(0,0,0,.2)','#fff',13,false);
+      if(can)buttons.push({x:bx,y:by,w:bw,h:bh,fn:()=>buyPerk(item.id,item.cost)});
+    }
+    y+=74;
+  }
+
+  // Section: Revive Token
+  y+=8;
+  c.textAlign='left';c.font='800 13px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.55)';
+  c.fillText('UTILITIES',30,y);y+=14;
+  rrect(c,30,y,VW-60,64,14,'rgba(255,255,255,.07)');
+  c.textAlign='left';c.font='800 16px Nunito,sans-serif';c.fillStyle='#fff';
+  c.fillText('💎 Free Revive Token',46,y+28);
+  c.font='700 11px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.5)';
+  c.fillText(`You have: ${reviveTok}  ·  Revive without watching an ad`,46,y+46);
+  {
+    const bx=VW-118,bw=88,bh=44,by=y+10;
+    const can=totalDia>=REVIVE_COST;
+    drawBtn(c,bx,by,bw,bh,`💎${REVIVE_COST}`,can?'#7C4DFF':'rgba(255,255,255,.1)',can?'#4A148C':'rgba(0,0,0,.2)','#fff',13,false);
+    if(can)buttons.push({x:bx,y:by,w:bw,h:bh,fn:buyRevive});
+  }
+  y+=74;
+
+  // Back button
+  drawBtn(c,30,y+6,VW-60,52,'⬅️  Back','rgba(255,255,255,.15)','rgba(0,0,0,.2)','#fff',16,false);
+  buttons.push({x:30,y:y+6,w:VW-60,h:52,fn:()=>{GS='HOME';buttons=[];}});
+}
+
+// ── Daily Missions ────────────────────────────────────
+function drawMissions(c){
+  const g=c.createLinearGradient(0,0,0,VH);
+  g.addColorStop(0,'#1A2A3D');g.addColorStop(1,'#0F1825');
+  c.fillStyle=g;c.fillRect(0,0,VW,VH);
+
+  c.textAlign='center';c.font='900 28px Nunito,sans-serif';c.fillStyle='#fff';
+  c.fillText('📋 Daily Missions',VW/2,68);
+  c.font='700 13px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.55)';
+  c.fillText('Resets at midnight — each mission gives +10💎',VW/2,94);
+
+  buttons=[];
+  let y=124;
+  daily.missions.forEach((m,idx)=>{
+    const def=MISSION_POOL.find(p=>p.id===m.id);
+    if(!def)return;
+    const done=m.progress>=def.goal;
+    rrect(c,30,y,VW-60,84,16,done?(m.claimed?'rgba(255,255,255,.06)':'rgba(255,215,64,.12)'):'rgba(255,255,255,.07)');
+    c.textAlign='left';c.font='800 15px Nunito,sans-serif';c.fillStyle='#fff';
+    c.fillText(`${def.icon}  ${def.name}`,46,y+30);
+    // Progress bar
+    const barX=46,barW=VW-180,barY=y+42,barH=10;
+    rrect(c,barX,barY,barW,barH,5,'rgba(0,0,0,.3)');
+    const ratio=Math.min(1,m.progress/def.goal);
+    if(ratio>0.02){
+      const pg=c.createLinearGradient(barX,0,barX+barW,0);
+      pg.addColorStop(0,'#81C784');pg.addColorStop(1,'#FFD740');
+      rrect(c,barX,barY,barW*ratio,barH,5,pg);
+    }
+    c.font='700 11px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.6)';
+    c.fillText(`${Math.min(m.progress,def.goal)}/${def.goal}`,46,y+70);
+
+    const bx=VW-118,bw=82,bh=44,by=y+20;
+    if(m.claimed){
+      drawBtn(c,bx,by,bw,bh,'✓ Claimed','rgba(255,255,255,.1)','rgba(0,0,0,.15)','rgba(255,255,255,.5)',11,false);
+    } else if(done){
+      drawBtn(c,bx,by,bw,bh,'Claim 💎','#FFD740','#FF8F00','#3E2723',12,true);
+      buttons.push({x:bx,y:by,w:bw,h:bh,fn:()=>claimMission(idx)});
+    } else {
+      drawBtn(c,bx,by,bw,bh,'In progress','rgba(255,255,255,.1)','rgba(0,0,0,.15)','rgba(255,255,255,.4)',11,false);
+    }
+    y+=98;
+  });
+
+  drawBtn(c,30,y+6,VW-60,52,'⬅️  Back','rgba(255,255,255,.15)','rgba(0,0,0,.2)','#fff',16,false);
+  buttons.push({x:30,y:y+6,w:VW-60,h:52,fn:()=>{GS='HOME';buttons=[];}});
 }
 
 // ── Play ──────────────────────────────────────────────
@@ -736,7 +1071,7 @@ function drawPlay(c){
     ['#0D1117','#1A2E00'],  // 7 Godzilla — nuclear night
     ['#FF69B4','#9B59B6'],  // 8 Dream Girl — magical pink-purple
   ];
-  const sk=skyThemes[Math.min(lvlIdx,8)];
+  const sk=(lvlIdx===8&&remixIdx>=0)?REMIX_THEMES[remixIdx%REMIX_THEMES.length].sky:skyThemes[Math.min(lvlIdx,8)];
   const sg=c.createLinearGradient(0,0,0,140);
   sg.addColorStop(0,sk[0]);sg.addColorStop(1,sk[1]);
   c.fillStyle=sg;c.fillRect(0,0,VW,140);
@@ -1787,6 +2122,10 @@ function drawSeedDead(c,x,y,angle,skin){
 }
 
 function drawSpiritTree(c,x,y,tokens){
+  const info=treeStageInfo(tokens);
+  const scl=0.72+info.stage*0.095; // grows visibly across 7 stages
+  c.save();c.translate(x,y);c.scale(scl,scl);c.translate(-x,-y);
+
   c.strokeStyle='#795548';c.lineWidth=18;c.lineCap='round';
   c.beginPath();c.moveTo(x,y);c.lineTo(x,y-120);c.stroke();
   c.lineWidth=9;c.strokeStyle='#5D4037';
@@ -1799,13 +2138,26 @@ function drawSpiritTree(c,x,y,tokens){
     c.globalAlpha=.92;c.fillStyle=lg;c.beginPath();c.arc(lx,ly,lr,0,Math.PI*2);c.fill();
   });
   c.globalAlpha=1;
-  if(tokens>=40){
-    ['#FF80AB','#FFD740','#FF4081'].forEach((col,i)=>{
-      const fx=x+(i-1)*50-15,fy=y-110-i*8;
+  // Flowers bloom from stage 2 onward; more blossoms at higher stages
+  if(info.stage>=2){
+    const fcount=Math.min(5,2+info.stage);
+    for(let i=0;i<fcount;i++){
+      const col=['#FF80AB','#FFD740','#FF4081','#CE93D8','#64FFDA'][i%5];
+      const fx=x+(i-fcount/2)*32,fy=y-108-((i*37)%24);
       c.fillStyle=col;
       for(let p=0;p<5;p++){const a=p*Math.PI*2/5;c.beginPath();c.arc(fx+Math.cos(a)*8,fy+Math.sin(a)*8,5.5,0,Math.PI*2);c.fill();}
       c.fillStyle='#FFF9C4';c.beginPath();c.arc(fx,fy,5,0,Math.PI*2);c.fill();
-    });
+    }
+  }
+  // Max-stage golden aura — the ultimate visible milestone
+  if(info.isMax){
+    for(let i=0;i<8;i++){
+      const a=(Date.now()*.0012+i*Math.PI/4)%(Math.PI*2);
+      const sx2=x+Math.cos(a)*70,sy2=y-128+Math.sin(a)*46;
+      c.fillStyle='#FFD700';c.globalAlpha=.55+Math.sin(a*2)*.35;
+      c.beginPath();c.arc(sx2,sy2,3,0,Math.PI*2);c.fill();
+    }
+    c.globalAlpha=1;
   }
   c.fillStyle='#D7CCC8';c.beginPath();c.arc(x,y-48,10,0,Math.PI*2);c.fill();
   c.fillStyle='#5D4037';
@@ -1813,6 +2165,7 @@ function drawSpiritTree(c,x,y,tokens){
   c.beginPath();c.arc(x+4,y-50,2.2,0,Math.PI*2);c.fill();
   c.beginPath();c.arc(x,y-46,5,.2,Math.PI-.2);
   c.strokeStyle='#5D4037';c.lineWidth=1.5;c.stroke();
+  c.restore();
 }
 
 function drawLaneDots(c){
@@ -1828,23 +2181,52 @@ function drawLaneDots(c){
 }
 
 function drawHUD(c,lvl){
-  rrect(c,10,10,VW-20,58,14,'rgba(0,0,0,.28)');
+  rrect(c,10,10,VW-20,68,14,'rgba(0,0,0,.28)');
   for(let i=0;i<Math.max(lives,3);i++)drawHeart(c,28+i*28,38,11,i<lives?'#EF5350':'rgba(255,255,255,.25)');
   c.textAlign='center';c.font='900 21px Nunito,sans-serif';c.fillStyle='#fff';
   c.fillText(`${Math.floor(elapsed)}s`,VW/2,43);
   c.font='700 11px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.6)';
   c.fillText('TIME',VW/2,57);
   c.textAlign='right';c.font='800 13px Nunito,sans-serif';c.fillStyle=LEVELS[Math.min(lvlIdx,8)].color;
-  c.fillText(LEVELS[Math.min(lvlIdx,8)].name,VW-18,38);
+  const dispName=(lvlIdx===8&&remixIdx>=0)?REMIX_THEMES[remixIdx%REMIX_THEMES.length].name:LEVELS[Math.min(lvlIdx,8)].name;
+  c.fillText(dispName,VW-18,38);
   c.font='700 11px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.6)';
   c.fillText(`Lv.${lvlIdx+1} · ⚡${Math.round(curSpd()/BASE_SPD*10)/10}x`,VW-18,55);
-  // Status strip: 🪙 coins  💎 diamonds  |  power-up bar
-  rrect(c,10,72,VW-20,32,10,'rgba(0,0,0,.26)');
-  c.textAlign='left';c.font='800 14px Nunito,sans-serif';c.fillStyle='#FFD740';
-  c.fillText(`🪙 ${sessionTok}`,18,92);
+  // "Next: X in Ys" teaser — always gives the player a near-term reason to
+  // keep going, instead of just watching a speed multiplier climb forever.
+  let teaser='',remain=99;
+  if(lvlIdx<8){
+    remain=Math.max(0,Math.ceil(LEVELS[lvlIdx].endT-elapsed));
+    teaser=`Next: ${LEVELS[lvlIdx+1].name} · ${remain}s`;
+  } else {
+    const cyclePos=(elapsed-L9_START)%REMIX_CYCLE;
+    remain=Math.max(0,Math.ceil(REMIX_CYCLE-cyclePos));
+    const nxt=REMIX_THEMES[(remixIdx+1)%REMIX_THEMES.length].name;
+    teaser=`Next realm: ${nxt} · ${remain}s`;
+  }
+  c.font='700 10px Nunito,sans-serif';
+  c.fillStyle=remain<=3?'#FFD740':'rgba(255,255,255,.5)';
+  c.globalAlpha=remain<=3?(.7+Math.sin(frameN*.4)*.3):1;
+  c.fillText(teaser,VW-18,69);
+  c.globalAlpha=1;
+  // Status strip: 🪙 coins  💎 diamonds  🔥 combo  |  power-up bar
+  rrect(c,10,84,VW-20,32,10,'rgba(0,0,0,.26)');
+  c.textAlign='left';c.textBaseline='alphabetic';
+  let segX=18;
+  c.font='800 14px Nunito,sans-serif';c.fillStyle='#FFD740';
+  const tokTxt=`🪙 ${sessionTok}`;c.fillText(tokTxt,segX,104);
+  segX+=c.measureText(tokTxt).width+14;
   if(sessionDiamonds>0){
     c.fillStyle='#64FFDA';c.font='800 13px Nunito,sans-serif';
-    c.fillText(`💎 ${sessionDiamonds}`,85,92);
+    const diaTxt=`💎 ${sessionDiamonds}`;c.fillText(diaTxt,segX,104);
+    segX+=c.measureText(diaTxt).width+14;
+  }
+  if(comboMax>1&&comboTimer>0){
+    c.fillStyle='#FF7043';c.font='900 13px Nunito,sans-serif';
+    c.globalAlpha=.65+Math.sin(frameN*.3)*.35;
+    const cmbTxt=`🔥x${comboMax}`;c.fillText(cmbTxt,segX,104);
+    c.globalAlpha=1;
+    segX+=c.measureText(cmbTxt).width+14;
   }
   // Power-up bar on right side (shield takes priority over flying)
   const hasPow=P.shieldTimer>0||P.flying;
@@ -1853,15 +2235,15 @@ function drawHUD(c,lvl){
     const ratio=isShield?P.shieldTimer/(10*60):P.flyTimer/(15*60);
     const c1=isShield?'#64FFDA':'#64B5F6',c2=isShield?'#FFD700':'#CE93D8';
     const lbl=isShield?`🛡 ${Math.ceil(P.shieldTimer/60)}s`:`🛸 ${Math.ceil(P.flyTimer/60)}s`;
-    const bx=sessionDiamonds>0?152:112,bw=VW-bx-18,barH=8;
-    rrect(c,bx,79,bw,barH,4,'rgba(0,0,0,.38)');
+    const bx=Math.min(segX+6,VW-110),bw=VW-bx-18,barH=8;
+    rrect(c,bx,91,bw,barH,4,'rgba(0,0,0,.38)');
     if(ratio>0.01){
       const pg=c.createLinearGradient(bx,0,bx+bw*ratio,0);
       pg.addColorStop(0,c1);pg.addColorStop(1,c2);
-      rrect(c,bx,79,bw*ratio,barH,4,pg);
+      rrect(c,bx,91,bw*ratio,barH,4,pg);
     }
     c.textAlign='right';c.font='700 10px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.78)';
-    c.fillText(lbl,VW-14,97);
+    c.fillText(lbl,VW-14,109);
   }
 }
 
@@ -1913,8 +2295,10 @@ function drawGameOver(c){
     c.fillText('Watch an ad to keep going!',VW/2,462);
   }
   for(const b of buttons){
-    const ip=b.style==='green';
-    drawBtn(c,b.x,b.y,b.w,b.h,b.label,ip?'#43A047':'rgba(255,255,255,.15)',ip?'#2E7D32':'rgba(0,0,0,.2)','#fff',ip?18:16,true);
+    const ip=b.style==='green',cy=b.style==='cyan';
+    const c1=ip?'#43A047':cy?'#00ACC1':'rgba(255,255,255,.15)';
+    const c2=ip?'#2E7D32':cy?'#00838F':'rgba(0,0,0,.2)';
+    drawBtn(c,b.x,b.y,b.w,b.h,b.label,c1,c2,'#fff',ip?18:16,true);
   }
 }
 
