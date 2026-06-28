@@ -219,7 +219,7 @@ function onTU(e){
 
   // Jump khi vuốt lên đủ xa và không quá nghiêng ngang
   if(Math.abs(ddy)<JUMP_MIN)return;
-  if(ddx>Math.abs(ddy)*1.8)return; // cho phép lệch ngang đến 80%
+  if(ddx>Math.abs(ddy)*1.8)return; // allow up to 80% horizontal offset
 
   if(ddy>0){
     if(P.onGnd&&!P.sliding){doJump();sfx('jump');}
@@ -446,7 +446,7 @@ function respawn(){
 function doRevive(){
   adsUsed++;
   // First run already had 3 lives; every ad-revive gives 2 lives
-  lives=2;
+  lives=3; // 3 lives restored after watching ad
   P=mkPlayer();P.blink=240;
   obstacles=obstacles.filter(o=>o.z>100);
   sfx('lvlup');GS='PLAYING';isFirst=false;buttons=[];
