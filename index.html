@@ -160,9 +160,19 @@ let sessionDiam=0;       // total diamonds this run
 // ── Ad-revive system — flat 5/run ──────────────────────
 const MAX_REVIVES = 5;
 let adsUsed = 0;
-let reviveDiffMult = 1.0;   // speed multiplier stacks per revive
-let lastReviveAt = -99;     // elapsed time of last revive (10s protection)
-let noReviveRun = true;     // track if player used zero revives this run
+let reviveDiffMult = 1.0;
+let lastReviveAt = -99;
+let noReviveRun = true;
+
+// ── Ad mode flag — switch to true when real ads are integrated ──
+// false = countdown timer (pre-monetization phase)
+// true  = real rewarded ads via AdinPlay / AdSense H5
+const REAL_ADS = false;
+
+// Countdown revive state
+let countdownActive = false;
+let countdownVal = 0;
+let countdownInterval = null;
 
 // ── Victory Lap (Level 9 gate met) ─────────────────────
 let victoryActive=false,victoryTimer=0,victoryDone=false;
@@ -345,6 +355,8 @@ function startGame(){
   lastUfoTime=-30;lastPotholeTime=0;lastAerialSpawn=0;
   levelStartT=0;lvlCoin=0;lvlDiam=0;sessionDiam=0;
   adsUsed=0;reviveDiffMult=1.0;lastReviveAt=-99;noReviveRun=true;
+  if(countdownInterval){clearInterval(countdownInterval);countdownInterval=null;}
+  countdownActive=false;countdownVal=0;
   victoryActive=false;victoryTimer=0;victoryDone=false;
   lives=3; sessionTok=0;
   obstacles=[];coins=[];particles=[];bgObjs=[];
@@ -492,16 +504,55 @@ function doRevive(){
   obstacles=obstacles.filter(o=>o.z>100);
   sfx('lvlup');GS='PLAYING';isFirst=false;buttons=[];
 }
-function goHome(){totalTok+=sessionTok;save();isFirst=false;GS='HOME';buttons=[];shake=0;}
+function goHome(){
+  if(countdownInterval){clearInterval(countdownInterval);countdownInterval=null;}
+  countdownActive=false;countdownVal=0;
+  totalTok+=sessionTok;save();isFirst=false;GS='HOME';buttons=[];shake=0;
+}
 
 function buildGOBtns(){
   buttons=[];
   const bx=85;
   const remaining=MAX_REVIVES-adsUsed;
-  if(canRevive)buttons.push({x:bx,y:492,w:VW-bx*2,h:62,
-    label:`📺  Watch Ad to Continue (${remaining} left)`,style:'green',fn:doRevive});
+  if(canRevive){
+    if(REAL_ADS){
+      // Real rewarded ad (AdinPlay / AdSense H5)
+      buttons.push({x:bx,y:492,w:VW-bx*2,h:62,
+        label:`📺  Watch Ad to Continue (${remaining} left)`,style:'green',fn:startAdRevive});
+    } else {
+      // Pre-monetization: countdown timer button
+      buttons.push({x:bx,y:492,w:VW-bx*2,h:62,
+        label:countdownActive?`⏳  Continue in ${countdownVal}s…`:`⏳  Wait 15s to Continue (${remaining} left)`,
+        style:'green',fn:startCountdown});
+    }
+  }
   buttons.push({x:bx,y:canRevive?574:510,w:VW-bx*2,h:54,
     label:'🏠  Back to Home',style:'ghost',fn:goHome});
+}
+
+function startCountdown(){
+  if(countdownActive)return; // already running
+  countdownActive=true;
+  countdownVal=15;
+  buildGOBtns(); // refresh button label immediately
+  countdownInterval=setInterval(()=>{
+    countdownVal--;
+    buildGOBtns(); // update label each second
+    if(countdownVal<=0){
+      clearInterval(countdownInterval);
+      countdownInterval=null;
+      countdownActive=false;
+      doRevive(); // auto-revive when countdown ends
+    }
+  },1000);
+}
+
+function startAdRevive(){
+  // Real ad hook — replace with AdinPlay / AdSense H5 call
+  // Example AdinPlay:
+  //   adinplay.showRewardedVideo({ onSuccess: doRevive, onError: ()=>{} });
+  // For now falls through to doRevive as placeholder
+  doRevive();
 }
 
 function cycleSkin(){
@@ -1829,14 +1880,25 @@ function drawGameOver(c){
   c.font='700 14px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.45)';c.fillText(`Best: ${bestScore}s`,VW/2,427);
   if(canRevive){
     const remaining=MAX_REVIVES-adsUsed;
-    c.font='700 13px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.55)';
-    c.fillText(`Watch an ad to keep going! (${adsUsed}/${MAX_REVIVES} used)`,VW/2,458);
+    if(REAL_ADS){
+      c.font='700 13px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.55)';
+      c.fillText(`Watch an ad to keep going! (${adsUsed}/${MAX_REVIVES} used)`,VW/2,458);
+    } else if(countdownActive){
+      const ratio=(15-countdownVal)/15;
+      const bw=VW-170;
+      rrect(c,85,445,bw,10,5,'rgba(255,255,255,.15)');
+      const fg=c.createLinearGradient(85,0,85+bw*ratio,0);
+      fg.addColorStop(0,'#69D36B');fg.addColorStop(1,'#FFD740');
+      rrect(c,85,445,bw*ratio,10,5,fg);
+      c.font='800 14px Nunito,sans-serif';c.fillStyle='#FFD740';
+      c.fillText(`Reviving in ${countdownVal}s… (${remaining} left)`,VW/2,474);
+    } else {
+      c.font='700 13px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.55)';
+      c.fillText(`⏳ Wait 15 seconds to continue (${remaining} left)`,VW/2,458);
+    }
   } else if(adsUsed>=MAX_REVIVES){
     c.font='700 13px Nunito,sans-serif';c.fillStyle='rgba(255,138,128,.85)';
-    c.fillText('🚫 All 5 continues used — start a new run!',VW/2,458);
-  } else {
-    c.font='700 13px Nunito,sans-serif';c.fillStyle='rgba(255,138,128,.85)';
-    c.fillText('Keep going — you can do it!',VW/2,458);
+    c.fillText('All 5 continues used — start a new run! 💪',VW/2,458);
   }
   for(const b of buttons){
     const ip=b.style==='green';
