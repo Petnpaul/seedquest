@@ -1,6 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<!-- Google Analytics 4 — replace G-9LGSLL8RY8 with your Measurement ID -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-9LGSLL8RY8"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-9LGSLL8RY8');
+</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <meta name="description" content="Seed Quest — a free endless runner. Help your tiny seed grow through 9 epic worlds. Play free in your browser!">
@@ -9,8 +17,8 @@
 <meta property="og:title" content="🌱 Seed Quest — Free Endless Runner">
 <meta property="og:description" content="Run, jump & dodge through 9 epic worlds. 100% free, no download needed!">
 <meta property="og:type" content="website">
-<meta property="og:url" content="https://petnpaul.github.io/seedquest/">
-<meta property="og:image" content="https://petnpaul.github.io/seedquest/preview.png">
+<meta property="og:url" content="https://gameseedquest.com/">
+<meta property="og:image" content="https://gameseedquest.com/preview.png">
 <!-- Twitter Card -->
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="🌱 Seed Quest — Free Endless Runner">
@@ -349,6 +357,8 @@ function spawnIv(){
 // ── Game Functions ────────────────────────────────────
 function startGame(){
   GS='PLAYING';
+  // GA4: track game session start
+  if(typeof gtag!=='undefined') gtag('event','session_start',{level:lvlIdx+1});
   elapsed=0;frameN=0;lvlIdx=0;scrollZ=0;
   flashTimer=0;shake=0;lastSpawn=0;
   breathTimer=0;postPotholeGap=0;
@@ -479,6 +489,14 @@ function playerDie(){
       if(Math.floor(elapsed)>bestScore){bestScore=Math.floor(elapsed);save();}
       totalTok+=sessionTok;save();
       shake=0;GS='GAMEOVER';buildGOBtns();
+      // GA4: track game over
+      if(typeof gtag!=='undefined') gtag('event','game_over',{
+        survival_seconds: Math.floor(elapsed),
+        level_reached: lvlIdx+1,
+        revives_used: adsUsed,
+        coins: sessionTok,
+        diamonds: sessionDiam
+      });
     }else respawn();
   },1400);
 }
@@ -495,11 +513,11 @@ function doRevive(){
   adsUsed++;
   noReviveRun=false;
   lastReviveAt=elapsed;
-  // Difficulty bump: +8% speed per revive (stacks)
   reviveDiffMult=1.0+adsUsed*0.08;
-  // Extra obstacles after 3rd revive
-  if(adsUsed>=3)breathTimer=0; // no breathing room — straight into action
-  lives=3; // 3 lives restored after watching ad
+  if(adsUsed>=3)breathTimer=0;
+  if(typeof gtag!=='undefined') gtag('event','revive_used',{
+    revive_number:adsUsed, level:lvlIdx+1, elapsed_seconds:Math.floor(elapsed)});
+  lives=3;
   P=mkPlayer();P.blink=240;
   obstacles=obstacles.filter(o=>o.z>100);
   sfx('lvlup');GS='PLAYING';isFirst=false;buttons=[];
@@ -507,6 +525,8 @@ function doRevive(){
 function goHome(){
   if(countdownInterval){clearInterval(countdownInterval);countdownInterval=null;}
   countdownActive=false;countdownVal=0;
+  if(typeof gtag!=='undefined') gtag('event','go_home',{
+    level:lvlIdx+1, survival_seconds:Math.floor(elapsed), revives_used:adsUsed});
   totalTok+=sessionTok;save();isFirst=false;GS='HOME';buttons=[];shake=0;
 }
 
@@ -583,8 +603,9 @@ function update(dt){
     const lv=LEVELS[lvlIdx];
     if(elapsed-levelStartT>=lv.minT&&lvlCoin>=lv.coinT&&lvlDiam>=lv.diamT){
       lvlIdx++;levelStartT=elapsed;lvlCoin=0;lvlDiam=0;
-      // Bonus coins for clean run (no revives used in this level)
       if(noReviveRun){ sessionTok+=10; lvlCoin+=10; addPart(VW/2,VH/2-80,12,['#FFD740','#FFEC80'],true); }
+      if(typeof gtag!=='undefined') gtag('event','level_up',{
+        new_level:lvlIdx+1, elapsed_seconds:Math.floor(elapsed), clean_run:noReviveRun});
       flashTimer=130;flashName=LEVELS[lvlIdx].name;
       sfx('lvlup');checkUnlocks();
       breathTimer=180;
