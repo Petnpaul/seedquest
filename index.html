@@ -222,7 +222,7 @@ let lvlCoin=0,lvlDiam=0; // progress within current level (resets on level-up)
 let sessionDiam=0;       // total diamonds this run
 
 // ── Ad-revive system — flat 5/run ──────────────────────
-const MAX_REVIVES = 5;
+const MAX_REVIVES = 2;
 let adsUsed = 0;
 let reviveDiffMult = 1.0;
 let lastReviveAt = -99;
@@ -590,16 +590,16 @@ function goHome(){
 function buildGOBtns(){
   buttons=[];
   const bx=85;
-  const remaining=MAX_REVIVES-adsUsed;
+  const isLast=adsUsed===MAX_REVIVES-1; // this would be the final continue
   if(canRevive){
     if(REAL_ADS){
-      // Real rewarded ad (AdinPlay / AdSense H5)
       buttons.push({x:bx,y:492,w:VW-bx*2,h:62,
-        label:`📺  Watch Ad to Continue (${remaining} left)`,style:'green',fn:startAdRevive});
+        label:isLast?'📺  Watch Ad — Last Continue!':'📺  Watch Ad to Continue',
+        style:'green',fn:startAdRevive});
     } else {
-      // Pre-monetization: countdown timer button
       buttons.push({x:bx,y:492,w:VW-bx*2,h:62,
-        label:countdownActive?`⏳  Continue in ${countdownVal}s…`:`⏳  Wait 15s to Continue (${remaining} left)`,
+        label:countdownActive?`⏳  Continue in ${countdownVal}s…`:
+              isLast?'⏳  Wait 15s — Last Continue!':'⏳  Wait 15s to Continue',
         style:'green',fn:startCountdown});
     }
   }
@@ -1957,10 +1957,12 @@ function drawGameOver(c){
   c.fillText(`🪙 +${sessionTok}   💎 +${sessionDiam}`,VW/2,396);
   c.font='700 14px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.45)';c.fillText(`Best: ${bestScore}s`,VW/2,427);
   if(canRevive){
-    const remaining=MAX_REVIVES-adsUsed;
+    const isLast=adsUsed===MAX_REVIVES-1;
     if(REAL_ADS){
-      c.font='700 13px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.55)';
-      c.fillText(`Watch an ad to keep going! (${adsUsed}/${MAX_REVIVES} used)`,VW/2,458);
+      c.font='700 13px Nunito,sans-serif';
+      c.fillStyle=isLast?'#FFB74D':'rgba(255,255,255,.55)';
+      c.fillText(isLast?'⚠️ Last continue! Make it count!':
+        `Watch an ad to keep going! (${adsUsed+1}/${MAX_REVIVES})`,VW/2,458);
     } else if(countdownActive){
       const ratio=(15-countdownVal)/15;
       const bw=VW-170;
@@ -1969,14 +1971,16 @@ function drawGameOver(c){
       fg.addColorStop(0,'#69D36B');fg.addColorStop(1,'#FFD740');
       rrect(c,85,445,bw*ratio,10,5,fg);
       c.font='800 14px Nunito,sans-serif';c.fillStyle='#FFD740';
-      c.fillText(`Reviving in ${countdownVal}s… (${remaining} left)`,VW/2,474);
+      c.fillText(`Reviving in ${countdownVal}s…`,VW/2,474);
     } else {
-      c.font='700 13px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.55)';
-      c.fillText(`⏳ Wait 15 seconds to continue (${remaining} left)`,VW/2,458);
+      c.font='700 13px Nunito,sans-serif';
+      c.fillStyle=isLast?'#FFB74D':'rgba(255,255,255,.55)';
+      c.fillText(isLast?'⚠️ Last continue! 15 seconds to revive…':
+        '⏳ Wait 15 seconds to continue',VW/2,458);
     }
   } else if(adsUsed>=MAX_REVIVES){
     c.font='700 13px Nunito,sans-serif';c.fillStyle='rgba(255,138,128,.85)';
-    c.fillText('All 5 continues used — start a new run! 💪',VW/2,458);
+    c.fillText('No more continues — start a new run! 💪',VW/2,458);
   }
   for(const b of buttons){
     const ip=b.style==='green';
