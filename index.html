@@ -222,7 +222,7 @@ let lvlCoin=0,lvlDiam=0; // progress within current level (resets on level-up)
 let sessionDiam=0;       // total diamonds this run
 
 // ── Ad-revive system — flat 5/run ──────────────────────
-const MAX_REVIVES = 2;
+const MAX_REVIVES = 5;
 let adsUsed = 0;
 let reviveDiffMult = 1.0;
 let lastReviveAt = -99;
@@ -240,6 +240,63 @@ let countdownInterval = null;
 
 // ── Victory Lap (Level 9 gate met) ─────────────────────
 let victoryActive=false,victoryTimer=0,victoryDone=false;
+
+// ── Feature 1: Costume Transform on level-up ───────────
+let transformTimer=0;          // frames remaining for transform animation
+const TRANSFORM_DUR=120;       // 2 seconds @ 60fps
+
+// ── Feature 2: Tunnel sequence ─────────────────────────
+let tunnelActive=false;        // currently in tunnel
+let tunnelTimer=0;             // frames remaining in tunnel
+let tunnelPhase='';            // 'enter'|'inside'|'exit'
+const TUNNEL_ENTER=50;         // ~0.8s
+const TUNNEL_INSIDE=900;       // ~15s @ 60fps (speed varies)
+const TUNNEL_EXIT=40;
+let tunnelLvl=-1;              // which level triggers tunnel (set dynamically)
+let lastTunnelAt=-999;         // avoid re-triggering
+
+// ── Feature 3: Near Miss ────────────────────────────────
+let nearMissFlash=0;           // frames to show "+CLOSE!" text
+let nearMissX=0;
+
+// ── Feature 4: Daily Challenge ──────────────────────────
+const DC_TYPES=[
+  {id:'survive60',  label:'Survive 60s in 1 run',     chk:function(){return elapsed>=60;}},
+  {id:'level3',     label:'Reach Level 3',             chk:function(){return lvlIdx>=2;}},
+  {id:'coins20',    label:'Collect 20 coins in 1 run', chk:function(){return sessionTok>=20;}},
+  {id:'diamonds3',  label:'Collect 3 diamonds in 1 run',chk:function(){return sessionDiam>=3;}},
+  {id:'norevive90', label:'Survive 90s no revive',     chk:function(){return elapsed>=90&&noReviveRun;}},
+];
+let dcToday=null,dcDone=false;
+function initDailyChallenge(){
+  const today=new Date().toDateString();
+  const stored=JSON.parse(localStorage.getItem('sq_dc')||'{}');
+  if(stored.date===today){dcToday=DC_TYPES.find(function(d){return d.id===stored.id;})||DC_TYPES[0];dcDone=stored.done||false;}
+  else{const idx=Math.floor((Date.now()/86400000))%DC_TYPES.length;dcToday=DC_TYPES[idx];dcDone=false;
+    localStorage.setItem('sq_dc',JSON.stringify({date:today,id:dcToday.id,done:false}));}
+}
+function checkDailyChallenge(){
+  if(dcDone||!dcToday)return;
+  if(dcToday.chk()){
+    dcDone=true;sessionTok+=20;lvlCoin+=20;
+    const stored=JSON.parse(localStorage.getItem('sq_dc')||'{}');
+    stored.done=true;localStorage.setItem('sq_dc',JSON.stringify(stored));
+    addPart(VW/2,VH/2-60,24,['#FFD740','#FFF176','#FFAB40','#fff'],true);
+    if(typeof gtag!=='undefined')gtag('event','daily_challenge_complete',{id:dcToday.id});
+    dcFlashTimer=180;
+  }
+}
+let dcFlashTimer=0;
+
+// ── Feature 5: Boss Obstacle ────────────────────────────
+let bossActive=false,bossZ=0,bossType='',bossLane=1,bossWarned=false;
+let lastBossAt=-999;
+const BOSS_INTERVAL=90; // seconds between boss spawns
+
+// ── Feature 6: Checkpoint ───────────────────────────────
+let checkpointElapsed=0,checkpointLvl=0,checkpointCoin=0,checkpointDiam=0;
+let checkpointSet=false;
+let checkpointFlash=0;
 
 // ── Player ────────────────────────────────────────────
 let P;
@@ -260,11 +317,11 @@ function mkPlayer(){
 // → Both actions are fully independent — no interference
 
 let tx0=0,ty0=0,tActive=false;
-let tRefX=0;                  // điểm gốc để tính moved
+let tRefX=0;                  // reference x-origin for delta calculation
 let tLaneCooldown=0;          // timestamp of last lane change
 const LANE_THR    = 38;       // px drag to trigger lane switch
 const LANE_CD_MS  = 200;      // ms between lane switches (prevents skipping lanes)
-const JUMP_MIN    = 22;       // px vuốt dọc tối thiểu để jump/slide
+const JUMP_MIN    = 22;       // min vertical px to trigger jump/slide
 
 function getPos(e){
   const r=CV.getBoundingClientRect();
@@ -320,9 +377,9 @@ function onTU(e){
   if(GS!=='PLAYING'||P.dead)return;
   const pos=getPos(e);
   const ddx=Math.abs(pos.x-tx0);
-  const ddy=ty0-pos.y;   // dương = vuốt lên
+  const ddy=ty0-pos.y;   // positive = swipe up
 
-  // Jump khi vuốt lên đủ xa và không quá nghiêng ngang
+  // Jump when swiped up far enough and not too horizontal
   if(Math.abs(ddy)<JUMP_MIN)return;
   if(ddx>Math.abs(ddy)*1.8)return; // allow up to 80% horizontal offset
 
@@ -423,6 +480,13 @@ function startGame(){
   adsUsed=0;reviveDiffMult=1.0;lastReviveAt=-99;noReviveRun=true;
   if(countdownInterval){clearInterval(countdownInterval);countdownInterval=null;}
   countdownActive=false;countdownVal=0;
+  transformTimer=0;
+  tunnelActive=false;tunnelTimer=0;tunnelPhase='';lastTunnelAt=-999;
+  nearMissFlash=0;
+  bossActive=false;bossZ=0;lastBossAt=-999;bossWarned=false;
+  checkpointSet=false;checkpointFlash=0;checkpointElapsed=0;
+  dcFlashTimer=0;
+  initDailyChallenge();
   victoryActive=false;victoryTimer=0;victoryDone=false;
   lives=3; sessionTok=0;
   obstacles=[];coins=[];particles=[];bgObjs=[];
@@ -574,9 +638,17 @@ function doRevive(){
   if(adsUsed>=3)breathTimer=0;
   if(typeof gtag!=='undefined') gtag('event','revive_used',{
     revive_number:adsUsed, level:lvlIdx+1, elapsed_seconds:Math.floor(elapsed)});
+  // Feature 6: restore from checkpoint if available
+  if(checkpointSet&&checkpointLvl>0){
+    lvlIdx=checkpointLvl;lvlCoin=checkpointCoin;lvlDiam=checkpointDiam;
+    levelStartT=checkpointElapsed;
+    checkpointFlash=90;
+    addPart(VW/2,VH/3,10,['#69D36B','#FFD740','#fff'],true);
+  }
   lives=3;
   P=mkPlayer();P.blink=240;
   obstacles=obstacles.filter(o=>o.z>100);
+  bossActive=false;tunnelActive=false;tunnelPhase='';
   sfx('lvlup');GS='PLAYING';isFirst=false;buttons=[];
 }
 function goHome(){
@@ -590,16 +662,16 @@ function goHome(){
 function buildGOBtns(){
   buttons=[];
   const bx=85;
-  const isLast=adsUsed===MAX_REVIVES-1; // this would be the final continue
+  const remaining=MAX_REVIVES-adsUsed;
   if(canRevive){
     if(REAL_ADS){
+      // Real rewarded ad (AdinPlay / AdSense H5)
       buttons.push({x:bx,y:492,w:VW-bx*2,h:62,
-        label:isLast?'📺  Watch Ad — Last Continue!':'📺  Watch Ad to Continue',
-        style:'green',fn:startAdRevive});
+        label:`📺  Watch Ad to Continue (${remaining} left)`,style:'green',fn:startAdRevive});
     } else {
+      // Pre-monetization: countdown timer button
       buttons.push({x:bx,y:492,w:VW-bx*2,h:62,
-        label:countdownActive?`⏳  Continue in ${countdownVal}s…`:
-              isLast?'⏳  Wait 15s — Last Continue!':'⏳  Wait 15s to Continue',
+        label:countdownActive?`⏳  Continue in ${countdownVal}s…`:`⏳  Wait 15s to Continue (${remaining} left)`,
         style:'green',fn:startCountdown});
     }
   }
@@ -666,13 +738,18 @@ function update(dt){
       flashTimer=130;flashName=LEVELS[lvlIdx].name;
       sfx('lvlup');checkUnlocks();
       breathTimer=180;
-      bgObjs=[];initBG(); // fresh BG objects for new level theme
+      bgObjs=[];initBG();
+      transformTimer=TRANSFORM_DUR; // Feature 1: trigger costume transform
+      // Feature 6: set checkpoint when gate passed
+      checkpointElapsed=elapsed;checkpointLvl=lvlIdx;
+      checkpointCoin=lvlCoin;checkpointDiam=lvlDiam;
+      checkpointSet=true;checkpointFlash=120;
       addPart(VW/2,VH/2,30,['#FF4081','#7C4DFF','#00BCD4','#FFD600'],true);
     }
   } else if(!victoryActive&&lvlIdx===LASTLVL&&!victoryDone){
     const lv=LEVELS[LASTLVL];
     if(elapsed-levelStartT>=lv.minT&&lvlCoin>=lv.coinT&&lvlDiam>=lv.diamT){
-      victoryActive=true;victoryTimer=12*60; // 12s victory lap
+      victoryActive=true;victoryTimer=12*60;
       obstacles=[];
       sfx('lvlup');flashTimer=170;flashName='🏆 CHAMPION! 🏆';
       addPart(VW/2,VH/2,50,['#FFD600','#FF4081','#7C4DFF','#fff','#F8BBD0'],true);
@@ -683,7 +760,72 @@ function update(dt){
     if(victoryTimer<=0){victoryActive=false;victoryDone=true;levelStartT=elapsed;lvlCoin=0;lvlDiam=0;}
   }
 
-  // Token
+  // Feature 1: costume transform timer
+  if(transformTimer>0)transformTimer--;
+
+  // Feature 2: tunnel trigger — every 45s if not recently triggered
+  if(!tunnelActive&&!victoryActive&&elapsed>10&&elapsed-lastTunnelAt>45){
+    // Trigger tunnel with 15% chance each second
+    if(Math.floor(elapsed)!==Math.floor(elapsed-dt)&&Math.random()<0.15){
+      tunnelActive=true;tunnelPhase='enter';tunnelTimer=TUNNEL_ENTER;
+      lastTunnelAt=elapsed;
+      obstacles=obstacles.filter(o=>o.z>300); // clear nearby obstacles
+    }
+  }
+  if(tunnelActive){
+    tunnelTimer--;
+    if(tunnelTimer<=0){
+      if(tunnelPhase==='enter'){tunnelPhase='inside';tunnelTimer=TUNNEL_INSIDE;}
+      else if(tunnelPhase==='inside'){tunnelPhase='exit';tunnelTimer=TUNNEL_EXIT;sfx('lvlup');}
+      else{tunnelActive=false;tunnelPhase='';}
+    }
+  }
+
+  // Feature 3: near miss detection
+  if(nearMissFlash>0)nearMissFlash--;
+  if(nearMissFlash===0&&!P.dead&&P.blink===0){
+    for(const o of obstacles){
+      if(o.aerial||!o.active)continue;
+      if(o.z>15||o.z<-15)continue;
+      // Adjacent lane + very close = near miss
+      if(Math.abs(o.lane-P.lane)===1&&o.z>-10&&o.z<20){
+        nearMissFlash=60;nearMissX=P.x;
+        sessionTok+=2;lvlCoin+=2;
+        addPart(P.x,P.y-30,6,['#FFD740','#FFEC80'],true);
+        sfx('coin');break;
+      }
+    }
+  }
+
+  // Feature 4: daily challenge check
+  if(!dcDone)checkDailyChallenge();
+  if(dcFlashTimer>0)dcFlashTimer--;
+
+  // Feature 5: boss obstacle
+  if(!bossActive&&!victoryActive&&elapsed-lastBossAt>BOSS_INTERVAL&&elapsed>30&&lvlIdx>=1){
+    if(Math.floor(elapsed)!==Math.floor(elapsed-dt)){
+      bossActive=true;
+      bossZ=1200;bossLane=Math.floor(Math.random()*3);
+      const types=['boulder','firetruck','iceberg','leviathan'];
+      bossType=types[Math.min(lvlIdx-1,types.length-1)];
+      bossWarned=true;lastBossAt=elapsed;
+      breathTimer=0; // stop spawning normal obstacles briefly
+    }
+  }
+  if(bossActive){
+    bossZ-=curSpd()*1.2; // boss moves faster than normal obstacles
+    if(bossZ<-80){bossActive=false;bossWarned=false;}
+    // Boss collision
+    if(!P.dead&&P.blink===0&&bossZ<40&&bossZ>-30&&P.lane===bossLane){
+      if(P.shieldOn){P.shieldOn=false;sfx('shield');bossActive=false;}
+      else playerDie();
+    }
+  }
+
+  // Feature 6: checkpoint flash
+  if(checkpointFlash>0)checkpointFlash--;
+
+  // Token per 10s
   const p2=Math.floor(elapsed-dt),c2=Math.floor(elapsed);
   if(c2>p2&&c2%10===0)sessionTok++;
 
@@ -1168,6 +1310,118 @@ function drawPlay(c){
 
   // Lane indicator dots
   drawLaneDots(c);
+
+  // Feature 3: Near Miss flash
+  if(nearMissFlash>0){
+    const nf=nearMissFlash/60;
+    c.save();c.globalAlpha=nf;c.textAlign='center';
+    c.font='900 22px Nunito,sans-serif';c.fillStyle='#FFD740';
+    c.shadowColor='rgba(0,0,0,.6)';c.shadowBlur=8;
+    c.fillText('+CLOSE! 🔥 +2',nearMissX,P.y-60);
+    c.shadowBlur=0;c.restore();
+  }
+
+  // Feature 4: Daily Challenge complete flash
+  if(dcFlashTimer>0){
+    const df=dcFlashTimer/180;
+    c.save();c.globalAlpha=Math.min(1,df*2);c.textAlign='center';
+    c.fillStyle='rgba(0,0,0,.5)';
+    rrect(c,40,VH/2-70,VW-80,80,16,'rgba(0,0,0,.6)');
+    c.font='900 17px Nunito,sans-serif';c.fillStyle='#FFD740';
+    c.fillText('🎯 Daily Challenge Complete!',VW/2,VH/2-38);
+    c.font='700 13px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.85)';
+    c.fillText(`+20 Coins Bonus!`,VW/2,VH/2-14);
+    c.restore();
+  }
+
+  // Feature 5: Boss warning + boss draw
+  if(bossWarned&&bossActive&&bossZ>600){
+    const bw=Math.sin(frameN*.25)*.5+.5;
+    c.save();c.globalAlpha=bw;c.textAlign='center';
+    c.font='900 20px Nunito,sans-serif';c.fillStyle='#EF5350';
+    c.shadowColor='rgba(0,0,0,.7)';c.shadowBlur=10;
+    c.fillText('⚠️  BOSS INCOMING!  ⚠️',VW/2,VH-120);
+    c.shadowBlur=0;c.restore();
+  }
+  if(bossActive&&bossZ<900&&bossZ>-80){
+    drawBossObs(c,bossLane,bossZ,bossType);
+  }
+
+  // Feature 6: Checkpoint flash
+  if(checkpointFlash>0){
+    const cf=checkpointFlash/120;
+    c.save();c.globalAlpha=cf*.8;c.textAlign='center';
+    rrect(c,60,VH/2+60,VW-120,54,14,'rgba(0,180,0,.3)');
+    c.font='800 16px Nunito,sans-serif';c.fillStyle='#69D36B';
+    c.fillText('✅ Checkpoint Saved!',VW/2,VH/2+92);
+    c.restore();
+  }
+
+  // Feature 2: Tunnel overlay
+  if(tunnelActive){
+    const tProg=tunnelTimer;
+    if(tunnelPhase==='enter'){
+      const fade=1-(tProg/TUNNEL_ENTER);
+      c.fillStyle=`rgba(0,0,0,${fade*.85})`;c.fillRect(0,0,VW,VH);
+      if(fade>.3){c.textAlign='center';c.globalAlpha=(fade-.3)/.7;
+        c.font='900 24px Nunito,sans-serif';c.fillStyle='#FFD740';
+        c.fillText('ENTERING TUNNEL',VW/2,VH/2);c.globalAlpha=1;}
+    } else if(tunnelPhase==='inside'){
+      // Dark tunnel with lamp streaks
+      c.fillStyle='rgba(0,0,0,.82)';c.fillRect(0,0,VW,VH);
+      // Lamp posts whizzing by
+      for(let li=0;li<4;li++){
+        const lp=((frameN*2.5+li*220)%900);
+        const ls=0.15+lp/900*.85;
+        const lx=VW/2+(li%2===0?-1:1)*(130*ls+30);
+        const ly=140+lp*(VH-140)/900;
+        c.fillStyle=`rgba(255,200,50,${ls*.6})`;
+        c.beginPath();c.arc(lx,ly,6*ls,0,Math.PI*2);c.fill();
+        const lg=c.createRadialGradient(lx,ly,2,lx,ly,55*ls);
+        lg.addColorStop(0,'rgba(255,200,50,.18)');lg.addColorStop(1,'rgba(0,0,0,0)');
+        c.fillStyle=lg;c.fillRect(lx-55*ls,ly-55*ls,110*ls,110*ls);
+      }
+      // Warning signs
+      if(Math.floor(frameN/40)%2===0){
+        c.fillStyle='#EF5350';c.globalAlpha=.7;
+        rrect(c,VW-72,300,56,28,6,'#EF5350');
+        c.globalAlpha=1;c.textAlign='center';c.font='800 11px Nunito,sans-serif';
+        c.fillStyle='#fff';c.fillText('⚠️ CAUTION',VW-44,319);
+      }
+    } else if(tunnelPhase==='exit'){
+      const fade=tProg/TUNNEL_EXIT;
+      c.fillStyle=`rgba(255,255,255,${fade*.9})`;c.fillRect(0,0,VW,VH);
+    }
+  }
+
+  // Feature 1: Costume transform overlay
+  if(transformTimer>0){
+    const tp=transformTimer/TRANSFORM_DUR;
+    const phase=tp>.5?'zoom':'reveal';
+    if(phase==='zoom'){
+      const zp=(tp-.5)/.5;
+      c.fillStyle=`rgba(0,0,0,${zp*.7})`;c.fillRect(0,0,VW,VH);
+      c.save();c.translate(VW/2,VH/2);
+      const sc3=1+zp*2;c.scale(sc3,sc3);
+      if(lvlIdx>=1)drawLevelCostume(c,0,0,1,1,1,frameN,false,false,false);
+      c.restore();c.globalAlpha=1;
+    } else {
+      const rp=tp/.5;
+      // Burst of light
+      const bg2=c.createRadialGradient(VW/2,VH/2,10,VW/2,VH/2,300);
+      bg2.addColorStop(0,`rgba(255,255,255,${(1-rp)*.6})`);
+      bg2.addColorStop(1,'rgba(0,0,0,0)');
+      c.fillStyle=bg2;c.fillRect(0,0,VW,VH);
+      c.save();c.translate(VW/2,VH/2);c.scale(1+(1-rp)*.5,1+(1-rp)*.5);
+      c.globalAlpha=.4+rp*.6;
+      if(lvlIdx>=1)drawLevelCostume(c,0,0,1,1,1,frameN,false,false,false);
+      c.restore();c.globalAlpha=1;
+      c.textAlign='center';c.font='900 28px Nunito,sans-serif';
+      c.fillStyle='#fff';c.globalAlpha=Math.max(0,(1-rp)*2);
+      c.fillText(`✨ ${LEVELS[Math.min(lvlIdx,LASTLVL)].name} ✨`,VW/2,VH/2+90);
+      c.globalAlpha=1;
+    }
+  }
 
   // Level flash
   if(flashTimer>0){
@@ -1863,6 +2117,81 @@ function drawSpiritTree(c,x,y,tokens){
   c.strokeStyle='#5D4037';c.lineWidth=1.5;c.stroke();
 }
 
+function drawBossObs(c,lane,z,type){
+  const lx=LANES[lane];
+  const {sx,sy,scale}=proj(lx,z,0);
+  if(scale<0.05||scale>1.05)return;
+  const w=160*scale,h=90*scale;
+  c.save();c.translate(sx,sy);
+  // Screen shake for boss
+  if(z<200){const sh=(200-z)/200*4;c.translate((Math.random()-.5)*sh,(Math.random()-.5)*sh);}
+  switch(type){
+    case 'boulder':{
+      const bg=c.createRadialGradient(-w*.15,-h*.2,h*.05,0,0,h*.7);
+      bg.addColorStop(0,'#78909C');bg.addColorStop(1,'#263238');
+      c.beginPath();c.arc(0,-h*.3,h*.65,0,Math.PI*2);c.fillStyle=bg;c.fill();
+      c.strokeStyle='#37474F';c.lineWidth=2.5*scale;c.stroke();
+      for(let ci=0;ci<5;ci++){
+        c.fillStyle='rgba(0,0,0,.2)';c.beginPath();
+        c.arc(-h*.3+ci*h*.15,-h*.25+Math.sin(ci)*h*.2,h*.1,0,Math.PI*2);c.fill();
+      }
+      c.fillStyle='rgba(255,255,255,.15)';c.beginPath();
+      c.arc(-h*.18,-h*.52,h*.18,0,Math.PI*2);c.fill();
+      break;}
+    case 'firetruck':{
+      c.fillStyle='#EF5350';rrect(c,-w*.5,-h*.8,w,h*.8,4*scale,'#EF5350');
+      c.fillStyle='#B71C1C';c.fillRect(-w*.5,-h*.9,w*.35,h*.2);
+      c.fillStyle='rgba(100,200,255,.6)';
+      c.fillRect(-w*.42,-h*.75,w*.28,h*.3);
+      for(let wi=0;wi<4;wi++){
+        c.fillStyle='#212121';c.beginPath();
+        c.arc(-w*.38+wi*w*.25,-h*.05,h*.22,0,Math.PI*2);c.fill();
+        c.fillStyle='#424242';c.beginPath();
+        c.arc(-w*.38+wi*w*.25,-h*.05,h*.12,0,Math.PI*2);c.fill();
+      }
+      c.fillStyle='#FF1744';c.beginPath();
+      c.arc(0,-h*.98,h*.12,0,Math.PI*2);c.fill();
+      if(Math.floor(frameN*.15)%2===0){c.fillStyle='rgba(255,23,68,.5)';c.beginPath();c.arc(0,-h*.98,h*.2,0,Math.PI*2);c.fill();}
+      break;}
+    case 'iceberg':{
+      const ig=c.createLinearGradient(-w*.5,-h*1.4,w*.5,0);
+      ig.addColorStop(0,'#E1F5FE');ig.addColorStop(.5,'#4FC3F7');ig.addColorStop(1,'#0288D1');
+      c.beginPath();c.moveTo(-w*.5,0);c.lineTo(-w*.35,-h*.8);
+      c.lineTo(-w*.1,-h*1.4);c.lineTo(w*.2,-h*1.1);
+      c.lineTo(w*.5,-h*.5);c.lineTo(w*.5,0);c.closePath();
+      c.fillStyle=ig;c.fill();c.strokeStyle='#B3E5FC';c.lineWidth=1.5*scale;c.stroke();
+      c.fillStyle='rgba(255,255,255,.4)';c.beginPath();
+      c.moveTo(-w*.3,-h*.6);c.lineTo(-w*.05,-h*1.1);c.lineTo(w*.1,-h*.7);c.closePath();c.fill();
+      break;}
+    case 'leviathan':{
+      const lg2=c.createLinearGradient(-w*.6,-h*.5,w*.6,h*.2);
+      lg2.addColorStop(0,'#1A237E');lg2.addColorStop(1,'#0D47A1');
+      c.beginPath();c.ellipse(0,-h*.3,w*.55,h*.45,0,0,Math.PI*2);c.fillStyle=lg2;c.fill();
+      // Eye
+      c.fillStyle='#F44336';c.beginPath();c.arc(w*.2,-h*.45,h*.12,0,Math.PI*2);c.fill();
+      c.fillStyle='#B71C1C';c.beginPath();c.arc(w*.22,-h*.46,h*.06,0,Math.PI*2);c.fill();
+      // Tentacles
+      for(let ti=0;ti<4;ti++){
+        c.strokeStyle='#283593';c.lineWidth=7*scale;c.beginPath();
+        const tx=-w*.4+ti*w*.28,startY=-h*.12;
+        c.moveTo(tx,startY);
+        c.quadraticCurveTo(tx+Math.sin(frameN*.08+ti)*w*.15,startY+h*.3+ti*h*.06,tx+Math.sin(frameN*.06+ti)*w*.1,startY+h*.55+ti*h*.08);
+        c.stroke();
+      }
+      // Fin
+      c.fillStyle='#1565C0';c.beginPath();
+      c.moveTo(-w*.1,-h*.7);c.lineTo(w*.05,-h*1.0);c.lineTo(w*.2,-h*.7);c.closePath();c.fill();
+      break;}
+  }
+  // Boss health warning glow
+  if(z<300){
+    const gr=z/300;
+    c.globalAlpha=(1-gr)*.35*(.5+Math.sin(frameN*.2)*.5);
+    c.fillStyle='#EF5350';c.beginPath();c.ellipse(0,-h*.3,w*.65,h*.55,0,0,Math.PI*2);c.fill();
+  }
+  c.globalAlpha=1;c.restore();
+}
+
 function drawLaneDots(c){
   // Show which lane player is in
   const dotY=GROUND_Y+28;
@@ -1915,7 +2244,22 @@ function drawHUD(c,lvl){
     c.textAlign='right';c.font='700 11px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.5)';
     c.fillText(`🪙Total ${sessionTok}`,VW-18,97);
   }
-}
+  // Tunnel indicator (top-right pip)
+  if(tunnelActive&&tunnelPhase==='inside'){
+    c.textAlign='right';c.font='700 10px Nunito,sans-serif';c.fillStyle='rgba(255,200,50,.8)';
+    c.fillText('🚇 TUNNEL',VW-18,114);
+  }
+  // Daily challenge mini-indicator bottom of HUD
+  if(dcToday&&!dcDone){
+    rrect(c,10,110,VW-20,22,8,'rgba(0,0,0,.18)');
+    c.textAlign='left';c.font='700 10px Nunito,sans-serif';c.fillStyle='rgba(255,213,79,.8)';
+    c.fillText(`🎯 ${dcToday.label}`,18,125);
+  } else if(dcDone){
+    rrect(c,10,110,VW-20,22,8,'rgba(0,100,0,.25)');
+    c.textAlign='left';c.font='700 10px Nunito,sans-serif';c.fillStyle='rgba(165,214,167,.9)';
+    c.fillText('🎯 Daily Challenge Complete ✅',18,125);
+  }
+} // end drawHUD
 
 function drawHeart(c,x,y,size,color){
   c.fillStyle=color;c.beginPath();
@@ -1957,12 +2301,10 @@ function drawGameOver(c){
   c.fillText(`🪙 +${sessionTok}   💎 +${sessionDiam}`,VW/2,396);
   c.font='700 14px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.45)';c.fillText(`Best: ${bestScore}s`,VW/2,427);
   if(canRevive){
-    const isLast=adsUsed===MAX_REVIVES-1;
+    const remaining=MAX_REVIVES-adsUsed;
     if(REAL_ADS){
-      c.font='700 13px Nunito,sans-serif';
-      c.fillStyle=isLast?'#FFB74D':'rgba(255,255,255,.55)';
-      c.fillText(isLast?'⚠️ Last continue! Make it count!':
-        `Watch an ad to keep going! (${adsUsed+1}/${MAX_REVIVES})`,VW/2,458);
+      c.font='700 13px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.55)';
+      c.fillText(`Watch an ad to keep going! (${adsUsed}/${MAX_REVIVES} used)`,VW/2,458);
     } else if(countdownActive){
       const ratio=(15-countdownVal)/15;
       const bw=VW-170;
@@ -1971,16 +2313,14 @@ function drawGameOver(c){
       fg.addColorStop(0,'#69D36B');fg.addColorStop(1,'#FFD740');
       rrect(c,85,445,bw*ratio,10,5,fg);
       c.font='800 14px Nunito,sans-serif';c.fillStyle='#FFD740';
-      c.fillText(`Reviving in ${countdownVal}s…`,VW/2,474);
+      c.fillText(`Reviving in ${countdownVal}s… (${remaining} left)`,VW/2,474);
     } else {
-      c.font='700 13px Nunito,sans-serif';
-      c.fillStyle=isLast?'#FFB74D':'rgba(255,255,255,.55)';
-      c.fillText(isLast?'⚠️ Last continue! 15 seconds to revive…':
-        '⏳ Wait 15 seconds to continue',VW/2,458);
+      c.font='700 13px Nunito,sans-serif';c.fillStyle='rgba(255,255,255,.55)';
+      c.fillText(`⏳ Wait 15 seconds to continue (${remaining} left)`,VW/2,458);
     }
   } else if(adsUsed>=MAX_REVIVES){
     c.font='700 13px Nunito,sans-serif';c.fillStyle='rgba(255,138,128,.85)';
-    c.fillText('No more continues — start a new run! 💪',VW/2,458);
+    c.fillText('All 5 continues used — start a new run! 💪',VW/2,458);
   }
   for(const b of buttons){
     const ip=b.style==='green';
