@@ -9,8 +9,6 @@
   gtag('js', new Date());
   gtag('config', 'G-9LGSLL8RY8');
 </script>
-<!-- icon appreared when searching website -->
-<link rel="icon" type="image/png" href="favicon.png">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <meta name="description" content="Seed Quest — a free endless runner. Help your tiny seed grow through 9 epic worlds. Play free in your browser!">
@@ -217,6 +215,7 @@ let lastAerialSpawn=0;
 let obstacles=[],coins=[],particles=[],bgObjs=[];
 let buttons=[];
 let scrollZ=0;
+let roadParticles=[];  // snow / petals / ash on the road surface
 
 // ── Level-gate progression (time + coin + diamond) ─────
 let levelStartT=0;       // elapsed time when current level began
@@ -480,7 +479,7 @@ function startGame(){
   initDailyChallenge();
   victoryActive=false;victoryTimer=0;victoryDone=false;
   lives=3; sessionTok=0;
-  obstacles=[];coins=[];particles=[];bgObjs=[];
+  obstacles=[];coins=[];particles=[];bgObjs=[];roadParticles=[];
   revived=false;canRevive=false;
   P=mkPlayer(); buttons=[];
   initBG();
@@ -1378,13 +1377,47 @@ function drawPlay(c){
 }
 
 // ── Road Drawing ──────────────────────────────────────
+function getRoadTint(){
+  // Road color shifts from day → dusk → night based on elapsed time
+  const t=Math.min(elapsed/180,1); // 0=morning, 1=full dusk at 3min
+  if(t<0.33){
+    // Morning → Afternoon: normal grey → warm grey
+    const r=Math.floor(84+t*3*40);  // 84→124
+    const g=Math.floor(110+t*3*10); // 110→120
+    const b=Math.floor(122-t*3*20); // 122→102
+    return`rgb(${r},${g},${b})`;
+  } else if(t<0.66){
+    // Afternoon → Golden hour: warm grey → orange tint
+    const p=(t-0.33)/0.33;
+    const r=Math.floor(124+p*30);   // 124→154
+    const g=Math.floor(120-p*20);   // 120→100
+    const b=Math.floor(102-p*30);   // 102→72
+    return`rgb(${r},${g},${b})`;
+  } else {
+    // Golden → Dusk: orange → deep purple-grey
+    const p=(t-0.66)/0.34;
+    const r=Math.floor(154-p*30);   // 154→124
+    const g=Math.floor(100-p*40);   // 100→60
+    const b=Math.floor(72+p*40);    // 72→112
+    return`rgb(${r},${g},${b})`;
+  }
+}
+function getGroundTint(){
+  const t=Math.min(elapsed/180,1);
+  if(t<0.5) return`rgb(${Math.floor(93+t*20)},${Math.floor(187-t*40)},${Math.floor(93+t*10)})`;
+  const p=(t-0.5)/0.5;
+  return`rgb(${Math.floor(103+p*30)},${Math.floor(147-p*60)},${Math.floor(103-p*30)})`;
+}
+
 function drawRoad(c,sz){
   const horizon=140;
   const roadW_near=360,roadW_far=90;
   const roadL=VW/2;
+  const roadCol=getRoadTint();
+  const groundCol=getGroundTint();
 
   // Ground sides
-  c.fillStyle='#5DBB5D';
+  c.fillStyle=groundCol;
   c.beginPath();
   c.moveTo(0,horizon);c.lineTo(roadL-roadW_far/2,horizon);
   c.lineTo(roadL-roadW_near/2,VH);c.lineTo(0,VH);c.closePath();c.fill();
@@ -1393,12 +1426,25 @@ function drawRoad(c,sz){
   c.lineTo(roadL+roadW_near/2,VH);c.lineTo(VW,VH);c.closePath();c.fill();
 
   // Road body
-  c.fillStyle='#546E7A';
+  c.fillStyle=roadCol;
   c.beginPath();
   c.moveTo(roadL-roadW_far/2,horizon);
   c.lineTo(roadL+roadW_far/2,horizon);
   c.lineTo(roadL+roadW_near/2,VH);
   c.lineTo(roadL-roadW_near/2,VH);c.closePath();c.fill();
+
+  // Dusk overlay on road
+  const duskT=Math.max(0,(Math.min(elapsed/180,1)-0.5)/0.5);
+  if(duskT>0){
+    const dg=c.createLinearGradient(0,horizon,0,VH);
+    dg.addColorStop(0,`rgba(180,80,20,${duskT*0.18})`);
+    dg.addColorStop(1,`rgba(100,30,80,${duskT*0.12})`);
+    c.fillStyle=dg;
+    c.beginPath();
+    c.moveTo(roadL-roadW_far/2,horizon);c.lineTo(roadL+roadW_far/2,horizon);
+    c.lineTo(roadL+roadW_near/2,VH);c.lineTo(roadL-roadW_near/2,VH);
+    c.closePath();c.fill();
+  }
 
   // Road edge lines
   c.strokeStyle='#FFFFFF';c.lineWidth=2.5;c.globalAlpha=.35;
@@ -1412,23 +1458,116 @@ function drawRoad(c,sz){
     const lf=(li+1)/3;
     const x1f=roadL+(-roadW_far/2+roadW_far*lf);
     const x1n=roadL+(-roadW_near/2+roadW_near*lf);
-    // Dashed
     const steps=10;
     for(let s=0;s<steps;s+=2){
-      const t0=s/steps,t1=(s+.85)/steps;
-      const ax=x1f+(x1n-x1f)*t0, ay=horizon+(VH-horizon)*t0;
-      const bx=x1f+(x1n-x1f)*t1, by=horizon+(VH-horizon)*t1;
-      // Offset by scroll
       const offT=((sz*0.007)%(.2))/.2;
-      const atx=x1f+(x1n-x1f)*((t0+offT)%1), aty=horizon+(VH-horizon)*((t0+offT)%1);
-      const btx=x1f+(x1n-x1f)*((t1+offT)%1), bty=horizon+(VH-horizon)*((t1+offT)%1);
+      const atx=x1f+(x1n-x1f)*((s/steps+offT)%1),   aty=horizon+(VH-horizon)*((s/steps+offT)%1);
+      const btx=x1f+(x1n-x1f)*(((.85+s)/steps+offT)%1), bty=horizon+(VH-horizon)*(((.85+s)/steps+offT)%1);
       c.beginPath();c.moveTo(atx,aty);c.lineTo(btx,bty);c.stroke();
     }
   }
 
   // Ground plane below road
-  c.fillStyle='#4CAF50';c.fillRect(0,VH-60,VW,60);
-  c.fillStyle='#5DBB5D';c.fillRect(0,VH-60,VW,12);
+  c.fillStyle=groundCol;c.fillRect(0,VH-60,VW,60);
+
+  // ── Road particles (snow / petals / ash) ──────────────
+  spawnRoadParticles();
+  drawRoadParticles(c);
+}
+
+// Per-level road particle config
+function getRoadParticleConfig(){
+  switch(Math.min(lvlIdx,LASTLVL)){
+    case 0: return{type:'petal',cols:['#F8BBD0','#FCE4EC','#FFFFFF','#F48FB1'],rate:0.4,size:[4,8],spin:true};
+    case 1: return{type:'seafoam',cols:['rgba(255,255,255,0.6)','rgba(200,240,255,0.5)'],rate:0.3,size:[3,6],spin:false};
+    case 2: return{type:'snow',  cols:['#FFFFFF','#E3F2FD','#BBDEFB'],rate:0.7,size:[3,7],spin:false};
+    case 3: return{type:'sand',  cols:['rgba(255,213,79,0.5)','rgba(255,193,7,0.4)'],rate:0.5,size:[2,5],spin:true};
+    case 4: return{type:'leaf',  cols:['#66BB6A','#81C784','#A5D6A7'],rate:0.4,size:[5,9],spin:true};
+    case 5: return{type:'ember', cols:['rgba(255,87,34,0.7)','rgba(255,152,0,0.6)'],rate:0.6,size:[2,5],spin:false};
+    case 6: return{type:'snow',  cols:['#FFFFFF','#E3F2FD','#B3E5FC'],rate:1.2,size:[4,9],spin:false};
+    case 7: return{type:'bubble',cols:['rgba(77,208,225,0.5)','rgba(129,212,250,0.4)'],rate:0.3,size:[4,8],spin:false};
+    case 8: return{type:'star',  cols:['rgba(255,255,255,0.8)','rgba(206,147,216,0.7)','rgba(128,222,234,0.6)'],rate:0.4,size:[2,5],spin:true};
+    default:return{type:'petal', cols:['#F8BBD0','#FFFFFF'],rate:0.3,size:[3,6],spin:true};
+  }
+}
+
+function spawnRoadParticles(){
+  const cfg=getRoadParticleConfig();
+  if(Math.random()>cfg.rate*0.35)return;
+  // Spawn at a random world position on the road
+  const worldZ=200+Math.random()*600;
+  const laneW=120;
+  const worldX=VW/2+(Math.random()-0.5)*laneW*2.8;
+  const sz=cfg.size[0]+Math.random()*(cfg.size[1]-cfg.size[0]);
+  const col=cfg.cols[Math.floor(Math.random()*cfg.cols.length)];
+  roadParticles.push({
+    wx:worldX, wz:worldZ,
+    sz, col, type:cfg.type,
+    rot:Math.random()*Math.PI*2,
+    rotSpd:(Math.random()-0.5)*(cfg.spin?0.08:0),
+    vy:-(0.3+Math.random()*0.4), // drift upward on screen = falling forward
+    life:1.0, decay:0.006+Math.random()*0.004,
+    drift:(Math.random()-0.5)*0.8,
+  });
+}
+
+function drawRoadParticles(c){
+  const spd=curSpd();
+  for(let i=roadParticles.length-1;i>=0;i--){
+    const p=roadParticles[i];
+    p.wz-=spd*0.5;   // move toward player
+    p.wx+=p.drift;
+    p.rot+=p.rotSpd;
+    p.life-=p.decay;
+    if(p.wz<10||p.life<=0){roadParticles.splice(i,1);continue;}
+    const {sx,sy,scale}=proj(p.wx,p.wz,0);
+    if(scale<0.05||scale>0.98)continue;
+    const r=p.sz*scale;
+    c.save();c.translate(sx,sy);c.rotate(p.rot);c.globalAlpha=p.life*0.85;
+    switch(p.type){
+      case 'snow':
+        c.fillStyle=p.col;
+        c.beginPath();c.arc(0,0,r,0,Math.PI*2);c.fill();
+        // Snowflake cross
+        if(r>3){c.strokeStyle='rgba(255,255,255,0.5)';c.lineWidth=r*0.3;
+          c.beginPath();c.moveTo(-r,0);c.lineTo(r,0);c.stroke();
+          c.beginPath();c.moveTo(0,-r);c.lineTo(0,r);c.stroke();}
+        break;
+      case 'petal':
+        c.fillStyle=p.col;
+        c.beginPath();c.ellipse(0,0,r*1.4,r*0.7,0,0,Math.PI*2);c.fill();
+        break;
+      case 'leaf':
+        c.fillStyle=p.col;
+        c.beginPath();c.ellipse(0,0,r*1.2,r*0.6,0,0,Math.PI*2);c.fill();
+        c.strokeStyle='rgba(0,80,0,0.3)';c.lineWidth=0.8;
+        c.beginPath();c.moveTo(-r*1.2,0);c.lineTo(r*1.2,0);c.stroke();
+        break;
+      case 'ember':
+        c.fillStyle=p.col;
+        c.beginPath();c.arc(0,0,r,0,Math.PI*2);c.fill();
+        c.fillStyle='rgba(255,255,100,0.6)';
+        c.beginPath();c.arc(0,0,r*0.45,0,Math.PI*2);c.fill();
+        break;
+      case 'star':
+        c.fillStyle=p.col;
+        c.beginPath();
+        for(let pt=0;pt<5;pt++){
+          const a=pt/5*Math.PI*2-Math.PI/2;
+          const b=a+Math.PI/5;
+          if(pt===0)c.moveTo(Math.cos(a)*r,Math.sin(a)*r);
+          else c.lineTo(Math.cos(a)*r,Math.sin(a)*r);
+          c.lineTo(Math.cos(b)*r*0.4,Math.sin(b)*r*0.4);
+        }
+        c.closePath();c.fill();
+        break;
+      default:
+        c.fillStyle=p.col;
+        c.beginPath();c.arc(0,0,r,0,Math.PI*2);c.fill();
+    }
+    c.restore();
+  }
+  c.globalAlpha=1;
 }
 
 // ── Obstacle 3D ───────────────────────────────────────
